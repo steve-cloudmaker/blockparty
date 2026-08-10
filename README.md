@@ -37,6 +37,7 @@ retained on purpose; delete it yourself once you're sure).
 | `scripts/bootstrap.sh` | Human-readable copy of the EC2 user-data (installs Docker, Pterodactyl Panel, Wings, certbot) — the template embeds an equivalent copy directly |
 | `scripts/deploy.sh` | `aws cloudformation deploy` wrapper, auto-looks-up the hosted zone |
 | `scripts/teardown.sh` | `aws cloudformation delete-stack` wrapper |
+| `scripts/diagnose.sh` | Read-only health check — run on the instance to check for every known failure mode in one pass instead of clicking through the panel UI |
 | `POST_DEPLOY.md` | Manual setup after the stack is up: DNS check, wildcard cert issuance, admin account, node registration, server creation, backups, whitelist |
 
 ## Dev setup

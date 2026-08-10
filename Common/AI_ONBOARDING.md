@@ -136,6 +136,26 @@ edges hit so far are already patched. In rough chronological order:
     `8080/tcp` ingress rule on `GameServerSecurityGroup` in
     `cloudformation/minecraft-stack.yaml` — same restriction as the panel's
     443 rule, not opened any wider.
+12. **A Forge server crashes with `Unable to access jarfile server.jar`**
+    right after "Server marked as starting," even though the install
+    succeeded. Modern Forge (roughly 1.17+) installs a launcher script
+    (`run.sh`) plus a `*-shim.jar` instead of a monolithic `server.jar`, but
+    the built-in "Forge" egg's default Startup Command hardcodes `-jar
+    server.jar`. Not an infrastructure bug — fix is in the panel UI (the
+    server's Startup tab → Server Jar File variable, or the Startup Command
+    directly), not `bootstrap.sh`.
+
+## Diagnosing faster than clicking through the UI
+
+`scripts/diagnose.sh` checks all of the above in one pass — read-only,
+meant to be run on the instance over SSM. Reach for it before manually
+re-deriving any of the above from scratch:
+```
+curl -s https://raw.githubusercontent.com/steve-cloudmaker/blockparty/main/scripts/diagnose.sh | sudo bash
+```
+It only sees what the instance itself can see; security-group-level checks
+(which ports are actually open) still need `aws ec2 describe-security-groups`
+from your own machine — see `POST_DEPLOY.md` step 11.
 
 ## Conventions
 

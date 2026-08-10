@@ -63,9 +63,16 @@ describes the instance as of the last edit, not a log.
       with an admin-CIDR-restricted ingress rule, now permanent in
       `cloudformation/minecraft-stack.yaml`. Requires a `scripts/deploy.sh`
       re-run on this stack to actually take effect (SG change, not
-      user-data — a fresh boot won't pick it up).
-- [ ] **9. Wire up S3 backups** — blocked on Backup Limit being 0; rebuild
-      in progress.
+      user-data — a fresh boot won't pick it up). Confirmed working after
+      the rebuild + redeploy. The Forge server then crash-looped with
+      `Unable to access jarfile server.jar` — modern Forge ships a
+      `run.sh`/`*-shim.jar` launcher instead of a monolithic `server.jar`,
+      but the built-in egg's Startup Command still hardcodes `server.jar`
+      (gotcha #12, egg/version mismatch, not an infra bug — fix is in the
+      panel's Startup tab, per `POST_DEPLOY.md` step 8). `scripts/diagnose.sh`
+      added to catch this and every other gotcha above in one read-only
+      pass over SSM, instead of clicking through the panel UI to diagnose.
+- [ ] **9. Wire up S3 backups** — next up.
 - [ ] **10. Whitelist friends**
 - [ ] **11. Verify DDoS/security posture**
 

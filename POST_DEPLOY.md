@@ -289,6 +289,30 @@ Each server gets its own console, file manager, and scheduler in the panel
 jar to `/plugins`, restart; pick a new modpack version from the egg
 dropdown, reinstall).
 
+If a Forge server's console shows `Error: Unable to access jarfile
+server.jar` right after "Server marked as starting": the install itself
+succeeded, but modern Forge versions (roughly 1.17+) ship a launcher script
+(`run.sh`) plus a `*-shim.jar`, not a monolithic `server.jar` — the built-in
+"Forge" egg's default Startup Command still hardcodes `-jar server.jar`,
+which doesn't exist for these versions. Check what actually got installed:
+```
+sudo ls /var/lib/pterodactyl/volumes/<server-uuid>/
+```
+Then on the server's **Startup** tab, find the **Server Jar File** variable
+(or edit the Startup Command directly if there isn't one) and point it at
+the real filename — something like `forge-<version>-shim.jar`. Not an
+infrastructure bug, just an egg/Minecraft-version mismatch; not worth
+baking a fix into `bootstrap.sh` for.
+
+**Faster than clicking through the panel to find issues like this:**
+`scripts/diagnose.sh` checks every failure mode this project has hit so far
+in one pass — panel/Wings health, the hairpin-DNS and network-collision
+fixes are actually in place, cert status, and per-server launcher sanity
+(including this exact `server.jar` mismatch). Run it in your SSM session:
+```
+curl -s https://raw.githubusercontent.com/steve-cloudmaker/blockparty/main/scripts/diagnose.sh | sudo bash
+```
+
 If creating a server (or just opening the node overview) shows **"Could not
 establish a connection to the machine running this server. Please try
 again"**: this is the panel *backend* failing to reach Wings, not your

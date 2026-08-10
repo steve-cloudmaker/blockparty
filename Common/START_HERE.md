@@ -16,6 +16,7 @@ project.
 | [`Common/AI_ONBOARDING.md`](AI_ONBOARDING.md) | Context for an AI assistant picking this up cold |
 | `cloudformation/minecraft-stack.yaml` | The whole stack, one file |
 | `scripts/{bootstrap,deploy,teardown}.sh` | Deploy tooling |
+| `scripts/diagnose.sh` | Health check — run on the instance over SSM before manually diagnosing anything |
 
 ## If you're deploying this for the first time
 
