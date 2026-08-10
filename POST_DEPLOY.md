@@ -34,7 +34,7 @@ which certbot   # confirm the path certbot actually installed to
 certbot certonly --dns-route53 \
   -d "blockparty.charliesystems.ai" \
   -d "*.blockparty.charliesystems.ai" \
-  --non-interactive --agree-tos -m monkeyboy.esq@gmail.com
+  --non-interactive --agree-tos -m your-email@example.com
 ```
 This uses the instance's IAM role (scoped to just this hosted zone) to
 create/remove the `_acme-challenge` TXT record automatically — no manual DNS
