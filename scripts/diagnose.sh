@@ -14,9 +14,18 @@
 # POST_DEPLOY.md step 11. This script only sees what the instance itself
 # can see.
 
-ok()   { echo "[OK]   $1"; }
-warn() { echo "[WARN] $1"; }
-fail() { echo "[FAIL] $1"; }
+# Color only when stdout is an actual terminal (SSM sessions are) and the
+# user hasn't opted out via NO_COLOR (https://no-color.org) -- avoids
+# dumping raw escape codes into a file if output ever gets redirected/piped.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_OK=$'\033[32m'; C_WARN=$'\033[33m'; C_FAIL=$'\033[31m'; C_RESET=$'\033[0m'
+else
+  C_OK=""; C_WARN=""; C_FAIL=""; C_RESET=""
+fi
+
+ok()   { echo "${C_OK}[OK]${C_RESET}   $1"; }
+warn() { echo "${C_WARN}[WARN]${C_RESET} $1"; }
+fail() { echo "${C_FAIL}[FAIL]${C_RESET} $1"; }
 
 echo "=== blockparty diagnostics: $(date -u) ==="
 echo
