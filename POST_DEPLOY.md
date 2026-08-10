@@ -239,7 +239,19 @@ containers while the network gets recreated — a few seconds, harmless here.
 
 ## 7. Create allocations (ports) on the node
 
-Admin → Nodes → your node → Allocations → Create:
+Admin → Nodes → your node → Allocations → Create. The form asks for an IP
+address — use **`0.0.0.0`** (bind all interfaces), not the public/Elastic
+IP. The Elastic IP is NAT'd at AWS's network edge and is never actually
+bound to the instance's own network interface — the OS only knows its
+private IP (`10.20.x.x`). Wings/Docker would fail to bind if you entered
+the public IP here; this is the standard "node behind NAT" pattern
+Pterodactyl's own docs describe (don't use `127.0.0.1` either — the panel
+explicitly disallows it). If there's an optional **IP Alias** field, set it
+to `blockparty.charliesystems.ai` so the panel displays the friendly
+hostname instead of the internal IP — purely cosmetic, doesn't affect
+binding.
+
+Then create the two ports:
 - `25565` for the Paper world
 - `25566` for the Forge/Fabric world
 

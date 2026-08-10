@@ -107,6 +107,13 @@ edges hit so far are already patched. In rough chronological order:
    the end of the generated `docker-compose.yml` in `bootstrap.sh`), well
    clear of both Docker's own default bridge (`172.17.0.0/16`) and Wings'
    hardcoded default.
+9. **Allocation IP in the panel UI (Nodes → Allocations → Create) is not
+   the public/Elastic IP.** The Elastic IP is NAT'd at AWS's network edge
+   and is never actually bound to the instance's own interface — the OS
+   only knows its private IP (`10.20.x.x`). Use `0.0.0.0` to bind all
+   interfaces (never `127.0.0.1`, which the panel disallows). This is
+   documented in `POST_DEPLOY.md` step 7 — not a bug to fix, just a
+   UI field that's easy to fill in wrong once.
 
 ## Conventions
 
