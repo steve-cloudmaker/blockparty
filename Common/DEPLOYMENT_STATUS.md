@@ -36,13 +36,16 @@ describes the instance as of the last edit, not a log.
 - [x] **4. Log into the panel** — reachable and logged in (implied by
       reaching step 5/6).
 - [x] **5. Create a Location and a Node** — done.
-- [x] **6. Apply Wings config, start Wings** — hit two issues on this
-      instance, both now permanently fixed in `bootstrap.sh` for future
+- [x] **6. Apply Wings config, start Wings** — hit three issues on this
+      instance, all now permanently fixed in `bootstrap.sh` for future
       deploys: the hairpin-DNS timeout on `wings configure` (gotcha #6),
-      fixed by hand with a loopback `/etc/hosts` entry; then a timezone
+      fixed by hand with a loopback `/etc/hosts` entry; a timezone
       crash-loop on startup, `the supplied timezone n/a is invalid`
       (gotcha #7), fixed by hand with `Environment=TZ=UTC` on the systemd
-      unit. Wings running clean now.
+      unit; then a Docker network collision, `Pool overlaps with other one
+      on this address space` (gotcha #8), fixed by hand by pinning the
+      panel's compose network to `172.20.0.0/16`. `systemctl status wings`
+      now shows `active (running)`, clean.
 - [ ] **7. Create allocations (25565, 25566)**
 - [ ] **8. Create the two servers (Paper, Forge/Fabric)**
 - [ ] **9. Wire up S3 backups**

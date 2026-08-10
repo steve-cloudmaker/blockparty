@@ -429,6 +429,18 @@ Resources:
                 # boot otherwise. Individual migrations run over PHP's own
                 # PDO driver instead, which has no such default and just works.
                 - /srv/pterodactyl/panel/empty-schema:/app/database/schema
+
+          # Wings' own default network (pterodactyl_nw, created on its first start)
+          # hardcodes 172.18.0.0/16 -- the exact subnet Docker Compose picks by
+          # default for this project's own bridge network too, since panel+Wings
+          # share one box. Pin this one off Wings' default so `wings configure`/
+          # first-start never fails with "Pool overlaps with other one on this
+          # address space".
+          networks:
+            default:
+              ipam:
+                config:
+                  - subnet: 172.20.0.0/16
           COMPOSE
 
           # Real host path (not the old /srv/pterodactyl/panel/certs) so

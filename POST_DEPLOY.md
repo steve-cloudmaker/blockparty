@@ -210,6 +210,33 @@ sudo systemctl restart wings
 sudo systemctl status wings
 ```
 
+If `wings` fails immediately with `failed to configure docker environment
+error=Error response from daemon: Pool overlaps with other one on this
+address space`: Wings' own default network (`pterodactyl_nw`, created on
+its first start) hardcodes `172.18.0.0/16` — the exact subnet Docker
+Compose picks by default for the panel's own bridge network too, since
+panel and Wings share one box (`docker network inspect panel_default` will
+confirm the collision). Bootstrap now pins the panel's compose network to
+`172.20.0.0/16` so this shouldn't happen on a fresh deploy; if it does
+anyway (e.g. an older instance), fix and retry:
+```
+cd /srv/pterodactyl/panel
+sudo tee -a docker-compose.yml > /dev/null <<'YAML'
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+YAML
+sudo docker compose down
+sudo docker compose up -d
+sudo systemctl restart wings
+sudo systemctl status wings
+```
+`docker compose down`/`up` briefly stops the panel/database/cache
+containers while the network gets recreated — a few seconds, harmless here.
+
 ## 7. Create allocations (ports) on the node
 
 Admin → Nodes → your node → Allocations → Create:

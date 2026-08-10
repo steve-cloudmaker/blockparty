@@ -98,6 +98,15 @@ edges hit so far are already patched. In rough chronological order:
    on the `wings.service` systemd unit in `bootstrap.sh`, matching
    `APP_TIMEZONE: "UTC"` already set on the panel container — `TZ` env is
    checked before any host detection is attempted.
+8. **Wings fails to start with `Pool overlaps with other one on this
+   address space`.** Wings' own default network (`pterodactyl_nw`, created
+   on its first start) hardcodes `172.18.0.0/16` — the exact subnet Docker
+   Compose picks by default for the panel's own bridge network too, since
+   panel and Wings share one box here. Fixed by pinning the panel's compose
+   network to `172.20.0.0/16` explicitly (`networks.default.ipam` block at
+   the end of the generated `docker-compose.yml` in `bootstrap.sh`), well
+   clear of both Docker's own default bridge (`172.17.0.0/16`) and Wings'
+   hardcoded default.
 
 ## Conventions
 
