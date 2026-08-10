@@ -69,7 +69,7 @@ else
   mountpoint -q /srv/pterodactyl || mount /srv/pterodactyl
 fi
 
-mkdir -p /srv/pterodactyl/panel/{var,nginx,certs,logs,mysql,redis}
+mkdir -p /srv/pterodactyl/panel/{var,nginx,certs,logs,mysql,redis,empty-schema}
 mkdir -p /srv/pterodactyl/wings/{etc,logs}
 mkdir -p /srv/pterodactyl/wings-data   # bind-mounted into wings for server volumes
 
@@ -141,6 +141,14 @@ services:
       - /srv/pterodactyl/panel/nginx:/etc/nginx/http.d
       - /etc/letsencrypt:/etc/letsencrypt
       - /srv/pterodactyl/panel/logs:/app/storage/logs
+      # Shadows the image's bundled database/schema/mysql-schema.sql with an
+      # empty host dir so Laravel's migrate never attempts the raw-SQL fast
+      # path, which shells out to the mysql CLI. That CLI defaults to
+      # requiring TLS (Debian Trixie's mariadb-client 11.4+), which our
+      # internal-only mariadb container doesn't support, and fails migrate
+      # on every fresh boot otherwise. Individual migrations run over PHP's
+      # own PDO driver instead, which has no such default and just works.
+      - /srv/pterodactyl/panel/empty-schema:/app/database/schema
 COMPOSE
 
 # Real host path (not /srv/pterodactyl/panel/certs) so certbot, running

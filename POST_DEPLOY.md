@@ -133,10 +133,21 @@ plain TCP, protected by the security group + in-game whitelist + Shield
 Standard instead, same as it would be for AccuWebHosting or any other
 Minecraft host.
 
-## 3. Create the admin database schema + your admin account
+## 3. Create your admin account
+
+The database schema migrates and seeds itself automatically on first boot
+(bootstrap.sh shadows the image's bundled schema dump so this always goes
+through Laravel's normal per-migration path — see the comment above the
+`empty-schema` volume mount in `bootstrap.sh` if you're curious why).
+
+One known issue in Pterodactyl's individual migrations (as opposed to their
+squashed schema dump) leaves `users.external_id` as `NOT NULL` when it's
+meant to be nullable — creating your first user fails with `SQLSTATE[23000]:
+... Column 'external_id' cannot be null` otherwise. Fix it once, then create
+the account:
 
 ```
-docker compose exec panel php artisan migrate --seed --force
+docker compose exec database sh -c 'mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" panel -e "ALTER TABLE users MODIFY external_id VARCHAR(191) NULL DEFAULT NULL;"'
 docker compose exec panel php artisan p:user:make
 ```
 Follow the prompts (email, username, password, and answer "yes" to admin).
