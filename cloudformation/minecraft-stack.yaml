@@ -1,0 +1,665 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Minecraft hosting stack: single Graviton EC2 host running Pterodactyl Panel
+  + Wings (Paper + Forge/Fabric), dedicated VPC, SSM-only access, EBS data
+  volume with DLM snapshots, S3 backup bucket, CloudWatch alarms.
+  Deploy with: aws cloudformation deploy --profile dev-lab ...
+
+Parameters:
+  AdminCidr:
+    Type: String
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    Description: >
+      CIDR allowed to reach the Pterodactyl panel on 443 (e.g. your home
+      IP as x.x.x.x/32). Required — do not use 0.0.0.0/0.
+
+  GameCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    Description: >
+      CIDR allowed to reach the Minecraft ports (25565/25566). Default is
+      open to the internet, relying on the in-game whitelist for access
+      control. Narrow this if your friend group has static IPs.
+
+  NotificationEmail:
+    Type: String
+    Description: Email address for CloudWatch alarm notifications (SNS).
+
+  InstanceType:
+    Type: String
+    Default: c6g.xlarge
+    AllowedValues: [m6g.large, m6g.xlarge, c6g.large, c6g.xlarge, c6g.2xlarge]
+    Description: Graviton (ARM64) instance type running Panel + Wings.
+
+  DataVolumeSizeGiB:
+    Type: Number
+    Default: 60
+    MinValue: 20
+    MaxValue: 500
+    Description: Size of the EBS gp3 volume holding world saves and backups.
+
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+
+  RootDomain:
+    Type: String
+    Default: charliesystems.ai
+    Description: Apex domain, already hosted in Route 53 in this account.
+
+  SubdomainLabel:
+    Type: String
+    Default: blockparty
+    Description: >
+      Label under RootDomain for this project (e.g. "blockparty" gives
+      blockparty.charliesystems.ai). A wildcard cert and DNS record cover
+      *.<label>.<RootDomain> too, so future services (extra nodes, a status
+      page, etc.) need no further DNS/cert work.
+
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: >
+      Route 53 hosted zone ID for RootDomain. deploy.sh looks this up
+      automatically via `route53 list-hosted-zones-by-name`.
+
+Resources:
+
+  # ---------------------------------------------------------------- Network
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: minecraft-vpc }]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: minecraft-igw }]
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.20.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags: [{ Key: Name, Value: minecraft-public-subnet }]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: minecraft-public-rt }]
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # ----------------------------------------------------------- Security group
+  GameServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Minecraft host - panel HTTPS (admin only) + game ports
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref AdminCidr
+          Description: Pterodactyl panel (admin only)
+        - IpProtocol: tcp
+          FromPort: 25565
+          ToPort: 25565
+          CidrIp: !Ref GameCidr
+          Description: Paper world
+        - IpProtocol: tcp
+          FromPort: 25566
+          ToPort: 25566
+          CidrIp: !Ref GameCidr
+          Description: Forge/Fabric world
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags: [{ Key: Name, Value: minecraft-sg }]
+
+  # ------------------------------------------------------------------- IAM
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-instance-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: backup-bucket-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                  - !GetAtt BackupBucket.Arn
+                  - !Sub "${BackupBucket.Arn}/*"
+        - PolicyName: dns-and-cert-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Scoped to this one hosted zone — lets certbot's DNS-01
+              # challenge create/remove _acme-challenge TXT records here.
+              # Tradeoff: if this instance is compromised, an attacker
+              # could edit records in this zone (not the whole account).
+              - Effect: Allow
+                Action:
+                  - route53:ChangeResourceRecordSets
+                  - route53:ListResourceRecordSets
+                Resource: !Sub "arn:aws:route53:::hostedzone/${HostedZoneId}"
+              - Effect: Allow
+                Action:
+                  - route53:GetChange
+                Resource: "arn:aws:route53:::change/*"
+              - Effect: Allow
+                Action:
+                  - route53:ListHostedZones
+                  - route53:ListHostedZonesByName
+                Resource: "*"
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/minecraft/*"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  # -------------------------------------------------------------- S3 backups
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "minecraft-backups-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      VersioningConfiguration: { Status: Enabled }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: age-out-old-backups
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 30
+            ExpirationInDays: 90
+
+  # ---------------------------------------------------------------- Compute
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags: [{ Key: Name, Value: minecraft-eip }]
+      # Automatically covered by AWS Shield Standard (no action needed).
+
+  DataVolume:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: !GetAtt Instance.AvailabilityZone
+      Size: !Ref DataVolumeSizeGiB
+      VolumeType: gp3
+      Encrypted: true
+      Tags:
+        - { Key: Name, Value: minecraft-data }
+        - { Key: Backup, Value: "true" }
+
+  VolumeAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      InstanceId: !Ref Instance
+      VolumeId: !Ref DataVolume
+      Device: /dev/sdf
+
+  EipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIp.AllocationId
+      InstanceId: !Ref Instance
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref GameServerSecurityGroup]
+      IamInstanceProfile: !Ref InstanceProfile
+      Monitoring: true
+      MetadataOptions:
+        HttpTokens: required   # IMDSv2 only
+        HttpPutResponseHopLimit: 2
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - { Key: Name, Value: minecraft-host }
+        - { Key: Backup, Value: "true" }
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          # NOTE: functionally identical to scripts/bootstrap.sh (comments
+          # trimmed here for template size). See that file for the fully
+          # commented version. Embedded directly so the whole stack deploys
+          # from this one template with no separate upload step.
+          set -euo pipefail
+          exec > >(tee -a /var/log/bootstrap.log) 2>&1
+          echo "=== bootstrap start: $(date -u) ==="
+
+          dnf -y update
+          dnf -y install docker xfsprogs jq curl amazon-cloudwatch-agent
+          systemctl enable --now docker
+
+          mkdir -p /usr/local/lib/docker/cli-plugins
+          if [ ! -x /usr/local/lib/docker/cli-plugins/docker-compose ]; then
+            curl -sSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64" \
+              -o /usr/local/lib/docker/cli-plugins/docker-compose
+            chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+          fi
+
+          if ! command -v aws >/dev/null 2>&1; then
+            dnf -y install unzip
+            curl -s "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/awscliv2.zip
+            (cd /tmp && unzip -q awscliv2.zip && ./aws/install)
+          fi
+
+          dnf -y install python3-pip
+          pip3 install --break-system-packages --quiet certbot certbot-dns-route53
+
+          TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+          REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+          SUBDOMAIN=$(aws ssm get-parameter --name /minecraft/subdomain --region "$REGION" --query 'Parameter.Value' --output text)
+
+          ROOT_SRC=$(findmnt -n -o SOURCE / | sed 's/p\?[0-9]*$//')
+          DATA_DEV=""
+          for cand in /dev/nvme1n1 /dev/xvdf /dev/sdf; do
+            if [ -b "$cand" ] && [ "$cand" != "$ROOT_SRC" ]; then
+              DATA_DEV="$cand"
+              break
+            fi
+          done
+
+          if [ -z "$DATA_DEV" ]; then
+            echo "!! Could not locate data volume automatically; mount /srv/pterodactyl manually." >&2
+          else
+            mkdir -p /srv/pterodactyl
+            if ! blkid "$DATA_DEV" >/dev/null 2>&1; then
+              mkfs.xfs "$DATA_DEV"
+            fi
+            UUID=$(blkid -s UUID -o value "$DATA_DEV")
+            grep -q "$UUID" /etc/fstab || echo "UUID=$UUID /srv/pterodactyl xfs defaults,nofail 0 2" >> /etc/fstab
+            mountpoint -q /srv/pterodactyl || mount /srv/pterodactyl
+          fi
+
+          mkdir -p /srv/pterodactyl/panel/{var,nginx,certs,logs,mysql,redis}
+          mkdir -p /srv/pterodactyl/wings/{etc,logs}
+          mkdir -p /srv/pterodactyl/wings-data
+
+          CRED_FILE=/root/pterodactyl-credentials.txt
+          if [ ! -f "$CRED_FILE" ]; then
+            DB_ROOT_PW=$(openssl rand -hex 20)
+            DB_PANEL_PW=$(openssl rand -hex 20)
+            cat > "$CRED_FILE" <<EOF
+          # Generated on first boot. Root-readable only.
+          # Retrieve via SSM: sudo cat /root/pterodactyl-credentials.txt
+          MYSQL_ROOT_PASSWORD=$DB_ROOT_PW
+          MYSQL_PANEL_PASSWORD=$DB_PANEL_PW
+          EOF
+            chmod 600 "$CRED_FILE"
+          fi
+          # shellcheck disable=SC1090
+          source "$CRED_FILE"
+
+          cat > /srv/pterodactyl/panel/docker-compose.yml <<COMPOSE
+          services:
+            database:
+              image: mariadb:10.11
+              restart: unless-stopped
+              environment:
+                MYSQL_ROOT_PASSWORD: "$MYSQL_ROOT_PASSWORD"
+                MYSQL_DATABASE: "panel"
+                MYSQL_USER: "pterodactyl"
+                MYSQL_PASSWORD: "$MYSQL_PANEL_PASSWORD"
+              volumes:
+                - /srv/pterodactyl/panel/mysql:/var/lib/mysql
+
+            cache:
+              image: redis:7-alpine
+              restart: unless-stopped
+              volumes:
+                - /srv/pterodactyl/panel/redis:/data
+
+            panel:
+              image: ghcr.io/pterodactyl/panel:latest
+              restart: unless-stopped
+              ports:
+                - "443:443"
+                - "80:80"
+              links: [database, cache]
+              environment:
+                APP_URL: "https://$SUBDOMAIN"
+                APP_TIMEZONE: "UTC"
+                APP_SERVICE_AUTHOR: "admin@example.com"
+                TRUSTED_PROXIES: "*"
+                MAIL_FROM: "noreply@example.com"
+                MAIL_DRIVER: "log"
+                DB_HOST: "database"
+                DB_PORT: "3306"
+                DB_DATABASE: "panel"
+                DB_USERNAME: "pterodactyl"
+                DB_PASSWORD: "$MYSQL_PANEL_PASSWORD"
+                CACHE_DRIVER: "redis"
+                SESSION_DRIVER: "redis"
+                QUEUE_DRIVER: "redis"
+                REDIS_HOST: "cache"
+              volumes:
+                - /srv/pterodactyl/panel/var:/app/var
+                - /srv/pterodactyl/panel/nginx:/etc/nginx/http.d
+                - /etc/letsencrypt:/etc/letsencrypt
+                - /srv/pterodactyl/panel/logs:/app/storage/logs
+          COMPOSE
+
+          # Real host path (not the old /srv/pterodactyl/panel/certs) so
+          # certbot, running natively on the host, and the panel container
+          # both read/write the exact same cert files at
+          # /etc/letsencrypt/live/$SUBDOMAIN/{fullchain,privkey}.pem — the
+          # panel self-signs into this path on first boot, then certbot
+          # overwrites it with a real wildcard cert once you run the
+          # POST_DEPLOY.md step (docker compose restart panel picks it up).
+          mkdir -p /etc/letsencrypt
+
+          cd /srv/pterodactyl/panel
+          docker compose up -d
+
+          curl -sSL -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_arm64"
+          chmod +x /usr/local/bin/wings
+
+          cat > /etc/systemd/system/wings.service <<'UNIT'
+          [Unit]
+          Description=Pterodactyl Wings daemon
+          After=docker.service
+          Requires=docker.service
+          PartOf=docker.service
+
+          [Service]
+          WorkingDirectory=/etc/pterodactyl
+          ExecStart=/usr/local/bin/wings
+          Restart=on-failure
+          StartLimitInterval=180
+          StartLimitBurst=30
+          RestartSec=5
+          LimitNOFILE=4096
+          PIDFile=/var/run/wings/daemon.pid
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          mkdir -p /etc/pterodactyl
+          systemctl daemon-reload
+          systemctl enable wings
+
+          # Cert renewal: DNS-01 via the route53 plugin needs no open ports
+          # and no manual step once the first cert is issued (POST_DEPLOY.md).
+          cat > /etc/systemd/system/certbot-renew.service <<'UNIT'
+          [Unit]
+          Description=Renew Let's Encrypt certificates
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/certbot renew --quiet --deploy-hook "cd /srv/pterodactyl/panel && docker compose restart panel"
+          UNIT
+
+          cat > /etc/systemd/system/certbot-renew.timer <<'UNIT'
+          [Unit]
+          Description=Daily Let's Encrypt renewal check
+
+          [Timer]
+          OnCalendar=daily
+          RandomizedDelaySec=3600
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+          UNIT
+
+          systemctl daemon-reload
+          systemctl enable --now certbot-renew.timer
+
+          cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<EOF
+          {
+            "metrics": {
+              "namespace": "MinecraftHost",
+              "append_dimensions": { "InstanceId": "\${aws:InstanceId}" },
+              "metrics_collected": {
+                "mem": { "measurement": ["mem_used_percent"] },
+                "disk": { "measurement": ["used_percent"], "resources": ["/", "/srv/pterodactyl"] }
+              }
+            }
+          }
+          EOF
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+            -a fetch-config -m ec2 -s \
+            -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+
+          echo "=== bootstrap complete: $(date -u) ===" | tee /var/log/user-data-complete
+
+  # ------------------------------------------------------------- DNS & TLS
+  SubdomainParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /minecraft/subdomain
+      Type: String
+      Value: !Sub "${SubdomainLabel}.${RootDomain}"
+      Description: Fetched by bootstrap.sh to set the panel's APP_URL.
+
+  DnsApexRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "${SubdomainLabel}.${RootDomain}."
+      Type: A
+      TTL: "300"
+      ResourceRecords: [!Ref ElasticIp]
+
+  DnsWildcardRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "*.${SubdomainLabel}.${RootDomain}."
+      Type: A
+      TTL: "300"
+      ResourceRecords: [!Ref ElasticIp]
+
+  DnsSrvPaper:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "_minecraft._tcp.${SubdomainLabel}.${RootDomain}."
+      Type: SRV
+      TTL: "300"
+      ResourceRecords: [!Sub "0 5 25565 ${SubdomainLabel}.${RootDomain}."]
+
+  DnsSrvModded:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "_minecraft._tcp.modded.${SubdomainLabel}.${RootDomain}."
+      Type: SRV
+      TTL: "300"
+      ResourceRecords: [!Sub "0 5 25566 ${SubdomainLabel}.${RootDomain}."]
+
+  # -------------------------------------------------------------- Snapshots
+  DlmRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-dlm-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: dlm.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole
+
+  SnapshotPolicy:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: Daily snapshots of the Minecraft data volume
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt DlmRole.Arn
+      PolicyDetails:
+        ResourceTypes: [VOLUME]
+        TargetTags:
+          - { Key: Backup, Value: "true" }
+        Schedules:
+          - Name: DailySnapshots
+            TagsToAdd:
+              - { Key: SnapshotCreator, Value: DLM }
+            CreateRule: { Interval: 24, IntervalUnit: HOURS, Times: ["06:00"] }
+            RetainRule: { Count: 7 }
+            CopyTags: true
+
+  # ------------------------------------------------------------- Monitoring
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-alarms"
+
+  AlarmSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
+
+  CpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: High CPU on Minecraft host
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions: [{ Name: InstanceId, Value: !Ref Instance }]
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions: [!Ref AlarmTopic]
+
+  StatusCheckAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Instance status check failed
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed
+      Dimensions: [{ Name: InstanceId, Value: !Ref Instance }]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions: [!Ref AlarmTopic]
+
+  MemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: High memory usage on Minecraft host
+      Namespace: MinecraftHost
+      MetricName: mem_used_percent
+      Dimensions: [{ Name: InstanceId, Value: !Ref Instance }]
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions: [!Ref AlarmTopic]
+      TreatMissingData: notBreaching
+
+  DiskAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Low disk space on Minecraft host
+      Namespace: MinecraftHost
+      MetricName: disk_used_percent
+      Dimensions: [{ Name: InstanceId, Value: !Ref Instance }]
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions: [!Ref AlarmTopic]
+      TreatMissingData: notBreaching
+
+Outputs:
+  PublicIp:
+    Description: Elastic IP behind the domain below
+    Value: !Ref ElasticIp
+
+  PanelUrl:
+    Description: Panel URL (self-signed until you run the POST_DEPLOY.md cert step)
+    Value: !Sub "https://${SubdomainLabel}.${RootDomain}"
+
+  MinecraftAddressPaper:
+    Description: Address to give friends for the Paper world (no port needed — SRV record)
+    Value: !Sub "${SubdomainLabel}.${RootDomain}"
+
+  MinecraftAddressModded:
+    Description: Address to give friends for the Forge/Fabric world (no port needed — SRV record)
+    Value: !Sub "modded.${SubdomainLabel}.${RootDomain}"
+
+  InstanceId:
+    Value: !Ref Instance
+
+  BackupBucketName:
+    Value: !Ref BackupBucket
+
+  SsmConnectCommand:
+    Description: Shell access — no SSH key needed
+    Value: !Sub "aws ssm start-session --target ${Instance} --profile dev-lab --region ${AWS::Region}"
