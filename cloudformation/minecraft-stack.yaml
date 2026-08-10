@@ -398,6 +398,16 @@ Resources:
               ports:
                 - "443:443"
                 - "80:80"
+              # The panel container needs to reach Wings (a native systemd process
+              # on this same host) at https://$SUBDOMAIN:8080 to fetch node/server
+              # info. Docker containers have their own isolated /etc/hosts, so the
+              # host-level loopback entry above doesn't apply here -- without this
+              # override, that request resolves via public DNS to this instance's
+              # own Elastic IP and hits the same can't-hairpin-to-your-own-public-IP
+              # wall as before, just from inside the container. host-gateway is
+              # Docker's own alias for "the host, as reachable from this container".
+              extra_hosts:
+                - "$SUBDOMAIN:host-gateway"
               links: [database, cache]
               environment:
                 APP_URL: "https://$SUBDOMAIN"

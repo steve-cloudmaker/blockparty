@@ -114,6 +114,17 @@ edges hit so far are already patched. In rough chronological order:
    interfaces (never `127.0.0.1`, which the panel disallows). This is
    documented in `POST_DEPLOY.md` step 7 — not a bug to fix, just a
    UI field that's easy to fill in wrong once.
+10. **The panel shows "Could not establish a connection to the machine
+    running this server"** when creating/viewing a server. This is the
+    *panel backend* failing to reach Wings, not the browser — a second,
+    separate instance of gotcha #6's hairpin-DNS problem. Docker containers
+    have their own isolated `/etc/hosts`, so the host-level loopback entry
+    from gotcha #6 doesn't carry into the panel container; its request to
+    `https://$SUBDOMAIN:8080` resolves via public DNS to the instance's own
+    Elastic IP and hangs the same way. Fixed with an `extra_hosts:
+    ["$SUBDOMAIN:host-gateway"]` override on the panel service in
+    `docker-compose.yml` — `host-gateway` is Docker's own alias for "the
+    host, as reachable from this container," so no IP needs hardcoding.
 
 ## Conventions
 

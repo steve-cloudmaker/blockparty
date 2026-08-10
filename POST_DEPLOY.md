@@ -281,6 +281,28 @@ Each server gets its own console, file manager, and scheduler in the panel
 jar to `/plugins`, restart; pick a new modpack version from the egg
 dropdown, reinstall).
 
+If creating a server (or just opening the node overview) shows **"Could not
+establish a connection to the machine running this server. Please try
+again"**: this is the panel *backend* failing to reach Wings, not your
+browser. The panel container has its own isolated `/etc/hosts` — the
+loopback entry bootstrap adds for the subdomain lives on the host and
+doesn't carry into the container, so the panel's request to
+`https://blockparty.charliesystems.ai:8080` resolves via public DNS to this
+instance's own Elastic IP and hits the same can't-reach-your-own-public-IP
+wall as the `wings configure` issue in step 6 — just from inside Docker
+this time. Bootstrap now adds an `extra_hosts: - "$SUBDOMAIN:host-gateway"`
+override on the panel service so this shouldn't happen on a fresh deploy;
+if it does anyway, confirm with:
+```
+cd /srv/pterodactyl/panel
+docker compose exec panel sh -c 'curl -m 5 -vk https://blockparty.charliesystems.ai:8080/api/system'
+```
+A hang/timeout confirms it. Fix and retry:
+```
+sudo sed -i '/^  panel:/a\    extra_hosts:\n      - "blockparty.charliesystems.ai:host-gateway"' docker-compose.yml
+sudo docker compose up -d panel
+```
+
 ## 9. Wire up S3 backups
 
 Admin → that server → Settings, or globally in the panel's backup
