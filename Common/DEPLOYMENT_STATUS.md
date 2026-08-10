@@ -8,116 +8,74 @@ unattended (see the "automated vs. manual" note below).
 Update this file as steps get done. Don't treat it as historical — it
 describes the instance as of the last edit, not a log.
 
-## Current live stack
+## No live stack right now
 
-- Profile: `dev-lab`, region: `us-west-1`, stack: `minecraft-server`
-- Domain: `blockparty.charliesystems.ai`
-- **`InstanceId` changes on redeploy/replacement** — don't hardcode it
-  anywhere; pull it fresh from stack outputs:
-  ```bash
-  aws cloudformation describe-stacks --profile dev-lab --region us-west-1 \
-    --stack-name minecraft-server --query "Stacks[0].Outputs" --output table
-  ```
+A full tier-2 teardown (`scripts/teardown.sh`) ran and is confirmed
+complete — `aws cloudformation describe-stacks --stack-name
+minecraft-server` returns `ValidationError: Stack ... does not exist`. VPC,
+security group, IAM, EC2 instance, EBS data volume, DNS records, DLM
+policy, and SNS topic are all gone.
 
-## Full teardown note
+The **S3 backup bucket survived**, as designed (`DeletionPolicy: Retain`),
+confirmed present via `aws s3 ls`: `minecraft-backups-164083713732-us-west-1`
+(`us-west-1`). It holds the Paper and Forge/Fabric backups taken just
+before teardown — restore from these once a fresh instance and node exist
+again.
 
-Once `scripts/teardown.sh` (tier-2) actually runs, everything below this
-point goes stale — no live instance, no stack. The S3 backup bucket is the
-only thing that survives (has real backup data from both servers as of
-this teardown). When redeploying from scratch afterward, this whole step
-checklist resets to unchecked; the gotchas in `AI_ONBOARDING.md` are all
-already permanent in `bootstrap.sh`/the template, so a fresh deploy should
-sail through steps 1–8 without re-hitting any of them.
+## Step checklist (reset — nothing deployed)
 
-## Step checklist
+All steps below reset to unchecked; the previous run's history (which
+gotchas got hit, how they were fixed) lives in `git log` and in
+[`AI_ONBOARDING.md`](AI_ONBOARDING.md)'s gotcha list, which is
+instance-independent and still fully accurate for the next deploy. Per the
+"Automated vs. manual" note below, a fresh deploy should sail through
+steps 1–8 without re-hitting gotchas #1–3 and #5–12 (all permanent fixes in
+`bootstrap.sh`/the template now) — only gotcha #4's `ALTER TABLE` (step 3)
+remains a required manual one-liner.
 
-- [x] **1. Confirm DNS propagated** — verified, both apex and wildcard
-      resolve to the stack's `PublicIp`.
-- [x] **2. Issue the wildcard TLS cert** — issued via `certbot`
-      (`dns-route53`). Panel's SSL `panel.conf` written by hand per the
-      updated step 2 (the panel image doesn't do this automatically — see
-      [`AI_ONBOARDING.md`](AI_ONBOARDING.md) gotcha #5). Panel confirmed
-      reachable over HTTPS from the admin CIDR.
-- [x] **3. Create admin account** — done. `users.external_id` NOT NULL
-      issue (gotcha #4 in AI_ONBOARDING.md) was hit and fixed by hand on
-      *this* instance via a direct `ALTER TABLE`, since that fix landed in
-      `POST_DEPLOY.md` after this instance had already migrated. Admin
-      account: `steve.cloudmaker@gmail.com`, admin = yes.
-- [x] **4. Log into the panel** — reachable and logged in (implied by
-      reaching step 5/6).
-- [x] **5. Create a Location and a Node** — done.
-- [x] **6. Apply Wings config, start Wings** — hit three issues on this
-      instance, all now permanently fixed in `bootstrap.sh` for future
-      deploys: the hairpin-DNS timeout on `wings configure` (gotcha #6),
-      fixed by hand with a loopback `/etc/hosts` entry; a timezone
-      crash-loop on startup, `the supplied timezone n/a is invalid`
-      (gotcha #7), fixed by hand with `Environment=TZ=UTC` on the systemd
-      unit; then a Docker network collision, `Pool overlaps with other one
-      on this address space` (gotcha #8), fixed by hand by pinning the
-      panel's compose network to `172.20.0.0/16`. `systemctl status wings`
-      now shows `active (running)`, clean.
-- [x] **7. Create allocations (25565, 25566)** — done (IP `0.0.0.0` gotcha
-      #9, documented but not a bug).
-- [x] **8. Create the two servers (Paper, Forge/Fabric)** — both done.
-      Paper server created first (4096MB memory, 5000MB disk) and hit
-      "Could not establish a connection to the machine running this
-      server" — a second instance of the hairpin-DNS problem, this time
-      from inside the panel container's isolated `/etc/hosts` (gotcha
-      #10), fixed by hand with an `extra_hosts: host-gateway` override, now
-      permanent in `bootstrap.sh`. Forge/Fabric server created afterward
-      with no issues — confirms the fix holds. Backup Limit was left at 0
-      on the Paper server, blocking step 9 until rebuilt/reconfigured.
-      Opening a server's console also hit "We're having some trouble
-      connecting to your server" — Wings' daemon port (8080) was never
-      opened in the security group, even to admin CIDR (gotcha #11); fixed
-      with an admin-CIDR-restricted ingress rule, now permanent in
-      `cloudformation/minecraft-stack.yaml`. Requires a `scripts/deploy.sh`
-      re-run on this stack to actually take effect (SG change, not
-      user-data — a fresh boot won't pick it up). Confirmed working after
-      the rebuild + redeploy. The Forge server then crash-looped with
-      `Unable to access jarfile server.jar` — modern Forge ships a
-      `run.sh`/`*-shim.jar` launcher instead of a monolithic `server.jar`,
-      but the built-in egg's Startup Command still hardcodes `server.jar`
-      (gotcha #12, egg/version mismatch, not an infra bug — fix is in the
-      panel's Startup tab, per `POST_DEPLOY.md` step 8). `scripts/diagnose.sh`
-      added to catch this and every other gotcha above in one read-only
-      pass over SSM, instead of clicking through the panel UI to diagnose.
-- [x] **9. Wire up S3 backups** — done for both servers (Paper, Forge),
-      test backup confirmed successful on each.
-- [ ] **10. Whitelist friends** — blocked, needs a Minecraft license to
-      test with (no friends on hand). Not started.
-- [ ] **11. Verify DDoS/security posture** — not started.
-
-**A full (tier-2) teardown is planned next** — everything except the S3
-backup bucket goes away. See the "Full teardown" note below for what that
-means for this checklist afterward.
+- [ ] 1. Confirm DNS propagated
+- [ ] 2. Issue the wildcard TLS cert
+- [ ] 3. Create admin account
+- [ ] 4. Log into the panel
+- [ ] 5. Create a Location and a Node
+- [ ] 6. Apply Wings config, start Wings
+- [ ] 7. Create allocations (25565, 25566)
+- [ ] 8. Create the two servers (Paper, Forge/Fabric)
+- [ ] 9. Wire up S3 backups
+- [ ] 10. Whitelist friends — was blocked last time on needing a Minecraft
+      license to test with; still true unless that's been resolved since.
+- [ ] 11. Verify DDoS/security posture
 
 ## Automated vs. manual right now
 
 Steps 1–2 are what `bootstrap.sh` sets up automatically on a fresh instance
 (DNS records via CloudFormation, cert issuance still requires running the
 `certbot` command by hand — DNS-01 needs a real run, not just config).
-Step 3's schema-loading crash (gotcha #3) is now fixed permanently in
+Step 3's schema-loading crash (gotcha #3) is fixed permanently in
 `bootstrap.sh`, so a *fresh* deploy should sail through the automatic
 migration cleanly — but the `external_id` `ALTER TABLE` (gotcha #4) is
 still a required manual one-liner in `POST_DEPLOY.md`, since it depends on
 migrations having already finished. Steps 4 onward are inherently manual
 (panel UI clicks) and not expected to ever be automated.
 
-## Two-tier teardown and tagging (added, not yet exercised live)
+## Two-tier teardown and tagging
 
-`cloudformation/minecraft-stack.yaml` now has a `DeployCompute`
+`cloudformation/minecraft-stack.yaml` has a `DeployCompute`
 parameter/`HasCompute` condition (tier-1: `DEPLOY_COMPUTE=false
 scripts/deploy.sh` tears down EC2/EBS/EIP-association/alarms, keeps
-VPC/SG/IAM/S3 backups/DNS/DLM/SNS) and `deploy.sh` now tags every resource
-(`Project=blockparty Build=<stack name> ManagedBy=cloudformation`). Passed
-`cfn-lint` clean. **Not yet run against the live stack** — the next
-`scripts/deploy.sh` run (even with `DEPLOY_COMPUTE` left at its default
-`true`) will apply the new tags retroactively to existing resources, and a
-tier-1 teardown/rebuild cycle hasn't been exercised end-to-end yet. Worth
-a deliberate test before relying on it for a real catastrophic-failure
-scenario. Full design writeup in `ARCHITECTURE.md` → "Teardown tiers" /
-"Tagging", command reference in `POST_DEPLOY.md` → "Teardown & rebuild".
+VPC/SG/IAM/S3 backups/DNS/DLM/SNS) and `deploy.sh` tags every resource
+(`Project=blockparty Build=<stack name> ManagedBy=cloudformation`).
+
+**Tier-2 is now confirmed working for real** — this was the actual teardown
+just performed, S3 bucket retained exactly as designed. **Tier-1 still
+hasn't been exercised** — the stack went straight to a full teardown
+without a tier-1 test first. **Tagging is also still unverified against a
+real deploy** — the tagging feature landed after the last `deploy.sh` run
+on the now-deleted stack, so it never actually got applied; it'll apply for
+the first time on whatever the next `scripts/deploy.sh` run is. Worth
+watching for on the next fresh deploy. Full design writeup in
+`ARCHITECTURE.md` → "Teardown tiers" / "Tagging", command reference in
+`POST_DEPLOY.md` → "Teardown & rebuild".
 
 ## Known backlog (not blocking, not yet done)
 
