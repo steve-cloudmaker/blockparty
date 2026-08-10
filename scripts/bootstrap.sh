@@ -32,7 +32,11 @@ if ! command -v aws >/dev/null 2>&1; then
   (cd /tmp && unzip -q awscliv2.zip && ./aws/install)
 fi
 dnf -y install python3-pip
-pip3 install --break-system-packages --quiet certbot certbot-dns-route53
+# --break-system-packages only exists on pip >= 23.0.1 (PEP 668); AL2023's
+# default python3-pip (21.3.1) predates it and errors on the unknown flag.
+PIP_FLAGS=""
+pip3 install --help 2>/dev/null | grep -q break-system-packages && PIP_FLAGS="--break-system-packages"
+pip3 install $PIP_FLAGS --quiet certbot certbot-dns-route53
 
 TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
 REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
