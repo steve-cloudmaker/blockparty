@@ -161,6 +161,39 @@ open match to what AccuWebHosting-style hosts run. Two components:
    fully blocked from public access, with lifecycle rules to age out old
    backups automatically.
 
+## Teardown tiers
+
+The template splits resources into "core" (VPC, security group, IAM, the S3
+backup bucket, DNS records, the DLM snapshot policy, the SNS alarm topic)
+and "compute" (the EC2 instance, its EBS data volume, the Elastic IP
+*association*, and the instance-scoped CloudWatch alarms), gated by a
+`DeployCompute` parameter/`HasCompute` condition. This gives two teardown
+levels without needing separate stacks:
+
+- **Tier 1**: `DEPLOY_COMPUTE=false scripts/deploy.sh` — a stack update
+  that tears down just the compute resources. Core infra, including the
+  Elastic IP itself (not just its DNS records), stays allocated. Rebuilding
+  re-associates a fresh instance with the *same* EIP, so DNS never needs to
+  change across a rebuild — only the TLS cert needs reissuing, since it
+  lives on the instance's own disk.
+- **Tier 2**: `scripts/teardown.sh` — deletes the whole stack. The S3
+  backup bucket is the one exception (`DeletionPolicy: Retain`), on
+  purpose — bucket deletion is a separate, explicit, manual step even here.
+
+See `POST_DEPLOY.md`'s teardown section for the actual commands.
+
+## Tagging
+
+`deploy.sh` passes `--tags Project=blockparty Build=<stack name>
+ManagedBy=cloudformation` to `aws cloudformation deploy`, which
+CloudFormation propagates automatically to every taggable resource in the
+stack — no per-resource `Tags:` needed in the template for this. `Build`
+uses the stack name specifically so that if this ever grows into running
+several independent deployments side by side (a different friend group's
+server, a test stack), each one's resources stay identifiable at a glance
+via `aws resourcegroupstaggingapi` or the Resource Groups console, without
+having to cross-reference instance/volume IDs by hand.
+
 ## Monitoring
 
 - CloudWatch agent on the instance for CPU, memory, and disk (EC2's default

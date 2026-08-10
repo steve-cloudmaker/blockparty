@@ -378,6 +378,36 @@ the panel's file manager on `whitelist.json`.
 - `https://blockparty.charliesystems.ai` shows a valid, trusted cert (padlock,
   no warning) from any network.
 
+## Teardown & rebuild
+
+Two tiers, depending on how much you want to keep:
+
+**Tier 1 — keep core infra, rebuild the rest.** For "something went wrong
+with the instance/EBS volume, start fresh" scenarios. Tears down the EC2
+instance, its EBS data volume, the Elastic IP *association*, and the
+instance-scoped CloudWatch alarms — keeps the VPC, security group, IAM, S3
+backup bucket, DNS records, DLM snapshot policy, and SNS topic/subscription
+in place. This is a stack **update**, not a delete:
+```
+DEPLOY_COMPUTE=false scripts/deploy.sh
+```
+To rebuild: re-run `scripts/deploy.sh` normally (no `DEPLOY_COMPUTE`). A
+fresh instance boots via the same bootstrap and re-associates with the
+*same* Elastic IP — since DNS points at the EIP itself, not the instance,
+nothing needs to change there, and the wildcard cert just needs reissuing
+(POST_DEPLOY.md step 2 again). World save data on the old EBS volume is
+gone; restore from the S3 backup bucket (per-server Pterodactyl backups) or
+a DLM EBS snapshot (whole-volume, daily, 7-day retention) after rebuilding
+and re-registering the node.
+
+**Tier 2 — everything, to zero.** `scripts/teardown.sh` deletes the whole
+stack: VPC, security group, IAM, DNS records, DLM policy, SNS topic, and
+the EC2 instance if one still exists. The S3 backup bucket survives even
+this (`DeletionPolicy: Retain`) — deleting your actual backups is
+deliberately never bundled into a scripted teardown. The script prints the
+`aws s3 rb --force` command for that as a separate, explicit step once
+you're sure.
+
 ## Later, optional
 
 - Add a second Wings node if you outgrow one instance — the panel/node

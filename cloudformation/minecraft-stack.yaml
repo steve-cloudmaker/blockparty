@@ -63,6 +63,25 @@ Parameters:
       Route 53 hosted zone ID for RootDomain. deploy.sh looks this up
       automatically via `route53 list-hosted-zones-by-name`.
 
+  DeployCompute:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Set to "false" to tear down to core infra only — deletes the EC2
+      instance, its EBS data volume, the Elastic IP association, and the
+      instance-scoped CloudWatch alarms, while keeping the VPC, security
+      group, IAM, S3 backups, DNS records, the DLM snapshot policy, and the
+      SNS alarm topic/subscription in place. Set back to "true" (the
+      default) to rebuild: a fresh instance boots via the same bootstrap,
+      re-associates with the same Elastic IP, so DNS needs no changes.
+      Data on the old EBS volume is gone — restore world saves from the S3
+      backup bucket or a DLM snapshot after rebuilding. See POST_DEPLOY.md's
+      teardown section.
+
+Conditions:
+  HasCompute: !Equals [!Ref DeployCompute, "true"]
+
 Resources:
 
   # ---------------------------------------------------------------- Network
@@ -242,6 +261,7 @@ Resources:
 
   DataVolume:
     Type: AWS::EC2::Volume
+    Condition: HasCompute
     Properties:
       AvailabilityZone: !GetAtt Instance.AvailabilityZone
       Size: !Ref DataVolumeSizeGiB
@@ -253,6 +273,7 @@ Resources:
 
   VolumeAttachment:
     Type: AWS::EC2::VolumeAttachment
+    Condition: HasCompute
     Properties:
       InstanceId: !Ref Instance
       VolumeId: !Ref DataVolume
@@ -260,12 +281,14 @@ Resources:
 
   EipAssociation:
     Type: AWS::EC2::EIPAssociation
+    Condition: HasCompute
     Properties:
       AllocationId: !GetAtt ElasticIp.AllocationId
       InstanceId: !Ref Instance
 
   Instance:
     Type: AWS::EC2::Instance
+    Condition: HasCompute
     Properties:
       InstanceType: !Ref InstanceType
       ImageId: !Ref LatestAmiId
@@ -646,6 +669,7 @@ Resources:
 
   CpuAlarm:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasCompute
     Properties:
       AlarmDescription: High CPU on Minecraft host
       Namespace: AWS/EC2
@@ -660,6 +684,7 @@ Resources:
 
   StatusCheckAlarm:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasCompute
     Properties:
       AlarmDescription: Instance status check failed
       Namespace: AWS/EC2
@@ -674,6 +699,7 @@ Resources:
 
   MemoryAlarm:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasCompute
     Properties:
       AlarmDescription: High memory usage on Minecraft host
       Namespace: MinecraftHost
@@ -689,6 +715,7 @@ Resources:
 
   DiskAlarm:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasCompute
     Properties:
       AlarmDescription: Low disk space on Minecraft host
       Namespace: MinecraftHost
@@ -720,6 +747,7 @@ Outputs:
     Value: !Sub "modded.${SubdomainLabel}.${RootDomain}"
 
   InstanceId:
+    Condition: HasCompute
     Value: !Ref Instance
 
   BackupBucketName:
@@ -727,4 +755,5 @@ Outputs:
 
   SsmConnectCommand:
     Description: Shell access — no SSH key needed
+    Condition: HasCompute
     Value: !Sub "aws ssm start-session --target ${Instance} --profile dev-lab --region ${AWS::Region}"

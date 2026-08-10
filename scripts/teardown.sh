@@ -1,7 +1,15 @@
 #!/bin/bash
-# Tears down the stack. The S3 backup bucket has DeletionPolicy: Retain, so
-# it survives stack deletion on purpose — empty/delete it yourself once
-# you've confirmed you don't need the backups.
+# Tier-2 teardown: deletes the WHOLE stack — VPC, security group, IAM, DNS
+# records, DLM policy, SNS topic, and (if still present) the EC2 instance —
+# down to zero running/billed infra. The S3 backup bucket has
+# DeletionPolicy: Retain, so it survives even this — empty/delete it
+# yourself once you've confirmed you don't need the backups (see the
+# command this script prints below).
+#
+# For tier-1 teardown instead — keep the VPC/SG/IAM/S3 backups/DNS/DLM/SNS
+# in place, only tear down the EC2 instance/EBS volume/EIP association —
+# use `DEPLOY_COMPUTE=false scripts/deploy.sh` (a stack update, not a
+# delete). See POST_DEPLOY.md's teardown section.
 set -euo pipefail
 PROFILE="${AWS_PROFILE:-dev-lab}"
 REGION="${AWS_REGION:-us-east-1}"

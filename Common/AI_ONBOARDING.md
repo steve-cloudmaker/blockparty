@@ -157,6 +157,27 @@ It only sees what the instance itself can see; security-group-level checks
 (which ports are actually open) still need `aws ec2 describe-security-groups`
 from your own machine — see `POST_DEPLOY.md` step 11.
 
+## Teardown tiers and tagging
+
+The template has a `DeployCompute` parameter/`HasCompute` condition
+splitting resources into "core" (VPC, SG, IAM, S3 backups, DNS, DLM, SNS)
+and "compute" (EC2 instance, EBS data volume, EIP *association*,
+instance-scoped alarms). `DEPLOY_COMPUTE=false scripts/deploy.sh` tears
+down just compute via a stack update; re-running `scripts/deploy.sh`
+normally rebuilds it, re-associating with the *same* Elastic IP so DNS
+never needs touching. `scripts/teardown.sh` remains the tier-2 "delete
+everything" path (S3 bucket still retained). Full writeup in
+`ARCHITECTURE.md`'s "Teardown tiers" section and `POST_DEPLOY.md`'s
+teardown section — don't re-derive a different teardown scheme without
+reading those first, this one was a deliberate design choice (single stack
++ conditional resources, not a core/compute stack split) made after
+weighing both.
+
+`deploy.sh` also tags every resource in the stack via `--tags
+Project=blockparty Build=<stack name> ManagedBy=cloudformation` — `Build`
+is the stack name specifically, anticipating a future with more than one
+independent deployment side by side.
+
 ## Conventions
 
 - Never put secrets in tracked files. `.gitignore` blocks common shapes

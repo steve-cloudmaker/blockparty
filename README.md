@@ -25,8 +25,13 @@ registration, creating the Paper + Forge/Fabric servers, wiring up S3
 backups) — these involve secrets, so they're deliberately not automated
 into CloudFormation parameters.
 
-To tear everything down: `scripts/teardown.sh` (the S3 backup bucket is
-retained on purpose; delete it yourself once you're sure).
+Two teardown levels — see `POST_DEPLOY.md`'s teardown section for details:
+- `DEPLOY_COMPUTE=false scripts/deploy.sh` — tear down just the EC2
+  instance/EBS volume/EIP association, keep the VPC/SG/IAM/S3 backups/DNS
+  in place for a fast rebuild. Re-run `scripts/deploy.sh` normally to
+  rebuild.
+- `scripts/teardown.sh` — delete everything (the S3 backup bucket is
+  retained on purpose even here; delete it yourself once you're sure).
 
 ## Files
 

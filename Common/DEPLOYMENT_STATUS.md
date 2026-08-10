@@ -88,6 +88,21 @@ still a required manual one-liner in `POST_DEPLOY.md`, since it depends on
 migrations having already finished. Steps 4 onward are inherently manual
 (panel UI clicks) and not expected to ever be automated.
 
+## Two-tier teardown and tagging (added, not yet exercised live)
+
+`cloudformation/minecraft-stack.yaml` now has a `DeployCompute`
+parameter/`HasCompute` condition (tier-1: `DEPLOY_COMPUTE=false
+scripts/deploy.sh` tears down EC2/EBS/EIP-association/alarms, keeps
+VPC/SG/IAM/S3 backups/DNS/DLM/SNS) and `deploy.sh` now tags every resource
+(`Project=blockparty Build=<stack name> ManagedBy=cloudformation`). Passed
+`cfn-lint` clean. **Not yet run against the live stack** — the next
+`scripts/deploy.sh` run (even with `DEPLOY_COMPUTE` left at its default
+`true`) will apply the new tags retroactively to existing resources, and a
+tier-1 teardown/rebuild cycle hasn't been exercised end-to-end yet. Worth
+a deliberate test before relying on it for a real catastrophic-failure
+scenario. Full design writeup in `ARCHITECTURE.md` → "Teardown tiers" /
+"Tagging", command reference in `POST_DEPLOY.md` → "Teardown & rebuild".
+
 ## Known backlog (not blocking, not yet done)
 
 From a one-time `checkov` scan of `cloudformation/minecraft-stack.yaml`
