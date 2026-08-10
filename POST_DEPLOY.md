@@ -195,6 +195,21 @@ TLS still verifies correctly afterward — the cert matches the hostname
 regardless of which IP it's served from. You may need a fresh token from
 the panel's Auto-deploy if the failed attempt consumed the old one.
 
+If `wings` starts crash-looping (`systemctl status wings` shows
+`activating (auto-restart)`) with `journalctl -u wings` showing `failed to
+detect system timezone ... the supplied timezone n/a is invalid`: AL2023
+has no `/etc/timezone` file, and its minimal AMI often leaves
+`/etc/localtime` not set up as a real zoneinfo symlink, so `timedatectl`
+reports `Time zone: n/a` — Wings takes that literally and refuses to start.
+Bootstrap now sets `TZ=UTC` directly on the systemd unit so this shouldn't
+happen on a fresh deploy; if it does anyway, fix and retry:
+```
+sudo sed -i '/\[Service\]/a Environment=TZ=UTC' /etc/systemd/system/wings.service
+sudo systemctl daemon-reload
+sudo systemctl restart wings
+sudo systemctl status wings
+```
+
 ## 7. Create allocations (ports) on the node
 
 Admin → Nodes → your node → Allocations → Create:

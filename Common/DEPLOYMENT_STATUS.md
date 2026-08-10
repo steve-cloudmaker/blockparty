@@ -36,10 +36,13 @@ describes the instance as of the last edit, not a log.
 - [x] **4. Log into the panel** — reachable and logged in (implied by
       reaching step 5/6).
 - [x] **5. Create a Location and a Node** — done.
-- [x] **6. Apply Wings config, start Wings** — hit the hairpin-DNS timeout
-      (gotcha #6 in AI_ONBOARDING.md), fixed by hand with a loopback
-      `/etc/hosts` entry, then `wings configure` succeeded. Fix is now
-      permanent in `bootstrap.sh` for future deploys.
+- [x] **6. Apply Wings config, start Wings** — hit two issues on this
+      instance, both now permanently fixed in `bootstrap.sh` for future
+      deploys: the hairpin-DNS timeout on `wings configure` (gotcha #6),
+      fixed by hand with a loopback `/etc/hosts` entry; then a timezone
+      crash-loop on startup, `the supplied timezone n/a is invalid`
+      (gotcha #7), fixed by hand with `Environment=TZ=UTC` on the systemd
+      unit. Wings running clean now.
 - [ ] **7. Create allocations (25565, 25566)**
 - [ ] **8. Create the two servers (Paper, Forge/Fabric)**
 - [ ] **9. Wire up S3 backups**

@@ -88,6 +88,16 @@ edges hit so far are already patched. In rough chronological order:
    Wings and the panel talk over `127.0.0.1` instead. TLS still verifies
    correctly either way, since the cert matches the hostname regardless of
    which IP served it.
+7. **Wings can crash-loop on startup** with `the supplied timezone n/a is
+   invalid`. Its timezone auto-detection (`config.ConfigureTimezone()` in
+   the Wings source) falls back to parsing `timedatectl` output when
+   `/etc/timezone` doesn't exist — which it never does on AL2023, that's a
+   Debian/Ubuntu-only file — and AL2023's minimal AMI often hasn't set up
+   `/etc/localtime` as a real zoneinfo symlink, so `timedatectl` literally
+   prints `Time zone: n/a`. Fixed by setting `Environment=TZ=UTC` directly
+   on the `wings.service` systemd unit in `bootstrap.sh`, matching
+   `APP_TIMEZONE: "UTC"` already set on the panel container — `TZ` env is
+   checked before any host detection is attempted.
 
 ## Conventions
 

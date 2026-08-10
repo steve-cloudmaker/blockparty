@@ -191,6 +191,13 @@ PartOf=docker.service
 
 [Service]
 WorkingDirectory=/etc/pterodactyl
+# AL2023 has no /etc/timezone (a Debian/Ubuntu-only file) and its minimal
+# AMI often leaves /etc/localtime not properly set up as a zoneinfo symlink,
+# so `timedatectl` reports "Time zone: n/a" — Wings takes that literally
+# and refuses to start ("the supplied timezone n/a is invalid"). Force UTC
+# explicitly rather than relying on host detection, matching APP_TIMEZONE
+# on the panel container above.
+Environment=TZ=UTC
 ExecStart=/usr/local/bin/wings
 Restart=on-failure
 StartLimitInterval=180
