@@ -19,6 +19,16 @@ describes the instance as of the last edit, not a log.
     --stack-name minecraft-server --query "Stacks[0].Outputs" --output table
   ```
 
+## Full teardown note
+
+Once `scripts/teardown.sh` (tier-2) actually runs, everything below this
+point goes stale — no live instance, no stack. The S3 backup bucket is the
+only thing that survives (has real backup data from both servers as of
+this teardown). When redeploying from scratch afterward, this whole step
+checklist resets to unchecked; the gotchas in `AI_ONBOARDING.md` are all
+already permanent in `bootstrap.sh`/the template, so a fresh deploy should
+sail through steps 1–8 without re-hitting any of them.
+
 ## Step checklist
 
 - [x] **1. Confirm DNS propagated** — verified, both apex and wildcard
@@ -72,9 +82,15 @@ describes the instance as of the last edit, not a log.
       panel's Startup tab, per `POST_DEPLOY.md` step 8). `scripts/diagnose.sh`
       added to catch this and every other gotcha above in one read-only
       pass over SSM, instead of clicking through the panel UI to diagnose.
-- [ ] **9. Wire up S3 backups** — next up.
-- [ ] **10. Whitelist friends**
-- [ ] **11. Verify DDoS/security posture**
+- [x] **9. Wire up S3 backups** — done for both servers (Paper, Forge),
+      test backup confirmed successful on each.
+- [ ] **10. Whitelist friends** — blocked, needs a Minecraft license to
+      test with (no friends on hand). Not started.
+- [ ] **11. Verify DDoS/security posture** — not started.
+
+**A full (tier-2) teardown is planned next** — everything except the S3
+backup bucket goes away. See the "Full teardown" note below for what that
+means for this checklist afterward.
 
 ## Automated vs. manual right now
 
