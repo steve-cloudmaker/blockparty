@@ -125,6 +125,17 @@ edges hit so far are already patched. In rough chronological order:
     ["$SUBDOMAIN:host-gateway"]` override on the panel service in
     `docker-compose.yml` — `host-gateway` is Docker's own alias for "the
     host, as reachable from this container," so no IP needs hardcoding.
+11. **A server's console shows "We're having some trouble connecting to
+    your server, please wait..." and never clears.** Different code path
+    than gotcha #10: the panel's *frontend* JS opens a WebSocket directly
+    from the browser to Wings' daemon port (8080), bypassing the panel
+    backend entirely — that's how the live console/stats work. The
+    security group originally never opened 8080 at all, on the (wrong, for
+    this specific case) assumption that Wings' API never needed to be
+    reachable from outside the host. Fixed with an admin-CIDR-restricted
+    `8080/tcp` ingress rule on `GameServerSecurityGroup` in
+    `cloudformation/minecraft-stack.yaml` — same restriction as the panel's
+    443 rule, not opened any wider.
 
 ## Conventions
 

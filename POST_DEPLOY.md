@@ -276,6 +276,14 @@ Admin → Servers → New:
   specific modpack a dropdown instead of manual jar wrangling)
 - Allocation: `25566`
 
+**Set Backup Limit to at least 1** in the server's feature limits (memory
+allocated in this session was 4096MB / disk 5000MB for the Paper world —
+size these to what your instance and worlds actually need). Leaving it at
+0 means the Backups tab won't let you create any, and you'll need step 9
+to actually work. This is usually editable later without a rebuild via
+Admin → Servers → your server → Build Configuration, if you catch it after
+the fact.
+
 Each server gets its own console, file manager, and scheduler in the panel
 — that's where day-to-day plugin/mod management happens (upload a plugin
 jar to `/plugins`, restart; pick a new modpack version from the egg
@@ -303,6 +311,21 @@ sudo sed -i '/^  panel:/a\    extra_hosts:\n      - "blockparty.charliesystems.a
 sudo docker compose up -d panel
 ```
 
+If a specific server's console instead shows **"We're having some trouble
+connecting to your server, please wait..."** and never clears: this is a
+different path than the one above — the panel's *frontend* JavaScript opens
+a WebSocket **directly from your browser** to Wings' daemon port (8080),
+bypassing the panel backend entirely, for the live console/stats. The
+security group originally only allowed 443/25565/25566 — the daemon port
+was never opened even to the admin CIDR, since the original design assumed
+Wings' API never needed to be reachable from outside the host at all (see
+`ARCHITECTURE.md`; this assumption was wrong for the console specifically).
+Fixed by adding an admin-CIDR-restricted `8080/tcp` ingress rule to
+`GameServerSecurityGroup` in `cloudformation/minecraft-stack.yaml` — same
+restriction as the panel's own 443 rule, so this doesn't expose Wings more
+broadly than the panel already is. Re-run `scripts/deploy.sh` to apply it
+to an existing stack (it's a non-destructive SG update).
+
 ## 9. Wire up S3 backups
 
 Admin → that server → Settings, or globally in the panel's backup
@@ -323,10 +346,10 @@ the panel's file manager on `whitelist.json`.
 
 ## 11. Verify the DDoS/security posture
 
-- `aws ec2 describe-security-groups` — confirm only 443 (your IP), 25565,
-  25566 are open.
-- Panel is unreachable from outside `AdminCidr` — try it from another
-  network.
+- `aws ec2 describe-security-groups` — confirm only 443 and 8080 (your IP),
+  and 25565, 25566 (open) are allowed.
+- Panel and Wings' daemon API (8080) are both unreachable from outside
+  `AdminCidr` — try it from another network.
 - Elastic IP is automatically under Shield Standard; nothing to configure.
 - `https://blockparty.charliesystems.ai` shows a valid, trusted cert (padlock,
   no warning) from any network.

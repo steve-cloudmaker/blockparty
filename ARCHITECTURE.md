@@ -84,15 +84,19 @@ open match to what AccuWebHosting-style hosts run. Two components:
 
 - Dedicated VPC (`10.20.0.0/16`), single public subnet — no NAT gateway
   needed since the box needs a public IP anyway.
-- Security group, default-deny, only three inbound rules:
+- Security group, default-deny, only four inbound rules:
   - `443/tcp` (panel HTTPS) — restricted to an admin CIDR you supply, not
     `0.0.0.0/0`.
+  - `8080/tcp` (Wings daemon API) — also restricted to the admin CIDR.
+    Needed because the panel's live console/stats view opens a WebSocket
+    directly from your browser to Wings, bypassing the panel backend
+    entirely — restricting it to admin CIDR keeps it from being reachable
+    by anyone else, same as the panel itself.
   - `25565/tcp` (Paper) and `25566/tcp` (Forge/Fabric) — open to the
     internet (Minecraft has no concept of IP-restricted play unless you
     also lock the SG down to friends' IPs), with the in-game **whitelist**
     as the actual access control.
-  - Everything else denied by default; Wings' internal daemon port (8080)
-    is never exposed outside the host.
+  - Everything else denied by default.
 - IAM instance role scoped to: SSM Session Manager, CloudWatch agent
   metrics, read/write to the one backup S3 bucket, and — new — write access
   to DNS records in *just* the `charliesystems.ai` hosted zone plus read of

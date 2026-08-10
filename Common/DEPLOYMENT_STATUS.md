@@ -55,8 +55,17 @@ describes the instance as of the last edit, not a log.
       from inside the panel container's isolated `/etc/hosts` (gotcha
       #10), fixed by hand with an `extra_hosts: host-gateway` override, now
       permanent in `bootstrap.sh`. Forge/Fabric server created afterward
-      with no issues — confirms the fix holds.
-- [ ] **9. Wire up S3 backups**
+      with no issues — confirms the fix holds. Backup Limit was left at 0
+      on the Paper server, blocking step 9 until rebuilt/reconfigured.
+      Opening a server's console also hit "We're having some trouble
+      connecting to your server" — Wings' daemon port (8080) was never
+      opened in the security group, even to admin CIDR (gotcha #11); fixed
+      with an admin-CIDR-restricted ingress rule, now permanent in
+      `cloudformation/minecraft-stack.yaml`. Requires a `scripts/deploy.sh`
+      re-run on this stack to actually take effect (SG change, not
+      user-data — a fresh boot won't pick it up).
+- [ ] **9. Wire up S3 backups** — blocked on Backup Limit being 0; rebuild
+      in progress.
 - [ ] **10. Whitelist friends**
 - [ ] **11. Verify DDoS/security posture**
 

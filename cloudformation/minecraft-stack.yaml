@@ -127,6 +127,12 @@ Resources:
           CidrIp: !Ref AdminCidr
           Description: Pterodactyl panel (admin only)
         - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !Ref AdminCidr
+          Description: Wings daemon API (admin only) - panel frontend connects to
+            this directly from the browser for the live console/stats websocket
+        - IpProtocol: tcp
           FromPort: 25565
           ToPort: 25565
           CidrIp: !Ref GameCidr
