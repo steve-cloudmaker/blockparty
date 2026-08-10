@@ -39,6 +39,18 @@ retained on purpose; delete it yourself once you're sure).
 | `scripts/teardown.sh` | `aws cloudformation delete-stack` wrapper |
 | `POST_DEPLOY.md` | Manual setup after the stack is up: DNS check, wildcard cert issuance, admin account, node registration, server creation, backups, whitelist |
 
+## Dev setup
+
+This repo is public, so a [pre-commit](https://pre-commit.com) hook
+(`.pre-commit-config.yaml`) runs [gitleaks](https://github.com/gitleaks/gitleaks)
+before every commit to block anything secret-shaped from landing in history.
+Git hooks aren't installed automatically on clone — after cloning, run once:
+
+```
+brew install pre-commit
+pre-commit install
+```
+
 Validated with `cfn-lint` (clean) and `bash -n` against the exact script
 embedded in the template. Not yet run against a live AWS account — I don't
 have your AWS credentials in this environment, so `deploy.sh` is meant to be
