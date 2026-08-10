@@ -144,6 +144,22 @@ edges hit so far are already patched. In rough chronological order:
     server.jar`. Not an infrastructure bug — fix is in the panel UI (the
     server's Startup tab → Server Jar File variable, or the Startup Command
     directly), not `bootstrap.sh`.
+13. **Redeploying from scratch after a tier-2 teardown fails changeset
+    creation** with `[AWS::EarlyValidation::ResourceExistenceCheck]`. The
+    S3 backup bucket survives the teardown on purpose
+    (`DeletionPolicy: Retain`), but S3 bucket names are globally unique, so
+    CloudFormation refuses to even build a changeset that tries to `Add` a
+    bucket with a name that already exists. Fixed with a
+    `BackupBucketExists` parameter/`ShouldCreateBackupBucket` condition —
+    when true, the template skips declaring the bucket and references it
+    by its deterministic name instead (falls out of CloudFormation's
+    management, which is fine — it was already effectively unmanaged the
+    moment `Retain` let it survive a stack deletion). `deploy.sh`
+    auto-detects this via `head-bucket` rather than needing a remembered
+    flag. If you hit this anyway (e.g. an older `deploy.sh` on disk), the
+    failed attempt leaves a stub stack in `REVIEW_IN_PROGRESS` with no real
+    resources — safe to `aws cloudformation delete-stack` before retrying
+    on a current checkout.
 
 ## Diagnosing faster than clicking through the UI
 
@@ -177,6 +193,10 @@ weighing both.
 Project=blockparty Build=<stack name> ManagedBy=cloudformation` — `Build`
 is the stack name specifically, anticipating a future with more than one
 independent deployment side by side.
+
+Redeploying from scratch after a tier-2 teardown has its own gotcha (#13
+above) — the retained S3 bucket collides with CloudFormation trying to
+recreate it. `deploy.sh` handles this automatically now.
 
 ## Conventions
 

@@ -408,6 +408,21 @@ deliberately never bundled into a scripted teardown. The script prints the
 `aws s3 rb --force` command for that as a separate, explicit step once
 you're sure.
 
+**Redeploying from scratch after a tier-2 teardown** will fail with
+`Failed to create the changeset: ... [AWS::EarlyValidation::ResourceExistenceCheck]`
+if you don't have the fix below — the S3 bucket survived on purpose, but
+S3 bucket names are globally unique, so CloudFormation refuses to create
+one with the same name again. `scripts/deploy.sh` auto-detects this
+(`head-bucket` check) and adjusts automatically, so this shouldn't surface
+at all on a current checkout. If it does anyway (e.g. an older
+`deploy.sh`), first clean up the stuck stub stack the failed attempt left
+behind:
+```
+aws cloudformation delete-stack --profile dev-lab --region us-west-1 --stack-name minecraft-server
+```
+(Safe — it's sitting in `REVIEW_IN_PROGRESS` with no real resources
+created yet.) Then re-run `scripts/deploy.sh` on a current checkout.
+
 ## Later, optional
 
 - Add a second Wings node if you outgrow one instance — the panel/node

@@ -66,16 +66,24 @@ scripts/deploy.sh` tears down EC2/EBS/EIP-association/alarms, keeps
 VPC/SG/IAM/S3 backups/DNS/DLM/SNS) and `deploy.sh` tags every resource
 (`Project=blockparty Build=<stack name> ManagedBy=cloudformation`).
 
-**Tier-2 is now confirmed working for real** — this was the actual teardown
-just performed, S3 bucket retained exactly as designed. **Tier-1 still
-hasn't been exercised** — the stack went straight to a full teardown
-without a tier-1 test first. **Tagging is also still unverified against a
-real deploy** — the tagging feature landed after the last `deploy.sh` run
-on the now-deleted stack, so it never actually got applied; it'll apply for
-the first time on whatever the next `scripts/deploy.sh` run is. Worth
-watching for on the next fresh deploy. Full design writeup in
-`ARCHITECTURE.md` → "Teardown tiers" / "Tagging", command reference in
-`POST_DEPLOY.md` → "Teardown & rebuild".
+**Tier-2 is confirmed working for real** — S3 bucket retained exactly as
+designed. **Tier-1 still hasn't been exercised** — the stack went straight
+to a full teardown without a tier-1 test first.
+
+**Redeploying from scratch after that tier-2 teardown immediately hit a
+real bug**: changeset creation failed with
+`[AWS::EarlyValidation::ResourceExistenceCheck]` — the retained S3 bucket
+collided with CloudFormation trying to `Add` a bucket with the same
+(globally unique) name again. Fixed with a `BackupBucketExists`
+parameter/`ShouldCreateBackupBucket` condition, `deploy.sh` now
+auto-detects it via `head-bucket` (see gotcha #13 in `AI_ONBOARDING.md`).
+The failed attempt left a stub stack in `REVIEW_IN_PROGRESS` — deleted
+before retrying. **Tagging still unverified against a real deploy** — the
+tagging feature landed after the last real deploy on the now-deleted
+stack, so it's never actually applied yet; watch for it on the next
+successful run. Full design writeup in `ARCHITECTURE.md` → "Teardown
+tiers" / "Tagging", command reference in `POST_DEPLOY.md` → "Teardown &
+rebuild".
 
 ## Known backlog (not blocking, not yet done)
 

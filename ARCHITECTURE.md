@@ -180,6 +180,19 @@ levels without needing separate stacks:
   backup bucket is the one exception (`DeletionPolicy: Retain`), on
   purpose — bucket deletion is a separate, explicit, manual step even here.
 
+Redeploying from scratch after a tier-2 teardown hits a real gotcha: the S3
+bucket is still there (that's the point), but S3 bucket names are globally
+unique, so CloudFormation's early validation refuses to even build a
+changeset that tries to `Add` it again — fails before anything else in the
+template gets touched. A `BackupBucketExists` parameter/
+`ShouldCreateBackupBucket` condition handles this: when true, the template
+skips declaring the bucket and just references it by its deterministic
+name instead (in the IAM policy and the `BackupBucketName` output). It
+falls out of CloudFormation's management at that point, which is fine —
+it was already effectively unmanaged the moment it survived a stack
+deletion via `Retain`. `deploy.sh` auto-detects this with a `head-bucket`
+check rather than requiring anyone to remember a flag.
+
 See `POST_DEPLOY.md`'s teardown section for the actual commands.
 
 ## Tagging

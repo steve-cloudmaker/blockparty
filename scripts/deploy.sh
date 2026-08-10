@@ -17,6 +17,10 @@
 #   # restore from the S3 backup bucket or a DLM snapshot afterward.
 #   ./deploy.sh
 #
+# Redeploying from scratch after a full (tier-2) teardown: the S3 backup
+# bucket survives on purpose (DeletionPolicy: Retain) and this script
+# auto-detects that and adjusts (BackupBucketExists) — no flag needed.
+#
 set -euo pipefail
 
 PROFILE="${AWS_PROFILE:-dev-lab}"
@@ -48,6 +52,22 @@ ROOT_DOMAIN="${ROOT_DOMAIN:-charliesystems.ai}"
 SUBDOMAIN_LABEL="${SUBDOMAIN_LABEL:-blockparty}"
 DEPLOY_COMPUTE="${DEPLOY_COMPUTE:-true}"
 
+# S3 bucket names are globally unique and the backup bucket has
+# DeletionPolicy: Retain, so it can survive a tier-2 teardown and still be
+# sitting there on a from-scratch redeploy — trying to create it again
+# fails CloudFormation's early validation before the changeset even builds.
+# Auto-detect instead of requiring anyone to remember a flag.
+if [ -z "${BACKUP_BUCKET_EXISTS:-}" ]; then
+  ACCOUNT_ID=$(aws sts get-caller-identity --profile "$PROFILE" --query Account --output text)
+  EXPECTED_BUCKET="minecraft-backups-${ACCOUNT_ID}-${REGION}"
+  if aws s3api head-bucket --profile "$PROFILE" --region "$REGION" --bucket "$EXPECTED_BUCKET" >/dev/null 2>&1; then
+    BACKUP_BUCKET_EXISTS=true
+    echo "Found existing backup bucket $EXPECTED_BUCKET — will reference it instead of trying to create it."
+  else
+    BACKUP_BUCKET_EXISTS=false
+  fi
+fi
+
 if [ -z "${HOSTED_ZONE_ID:-}" ]; then
   echo "Looking up the Route 53 hosted zone for $ROOT_DOMAIN..."
   HOSTED_ZONE_ID=$(aws route53 list-hosted-zones-by-name \
@@ -71,6 +91,7 @@ echo "  DataVolumeSizeGiB: $DATA_VOLUME_SIZE"
 echo "  Subdomain:         ${SUBDOMAIN_LABEL}.${ROOT_DOMAIN} (+ wildcard)"
 echo "  HostedZoneId:      $HOSTED_ZONE_ID"
 echo "  DeployCompute:     $DEPLOY_COMPUTE"
+echo "  BackupBucketExists: $BACKUP_BUCKET_EXISTS"
 echo
 if [ "$DEPLOY_COMPUTE" = "false" ]; then
   echo "DeployCompute=false: this TEARS DOWN the EC2 instance, its EBS data volume,"
@@ -102,6 +123,7 @@ aws cloudformation deploy \
     SubdomainLabel="$SUBDOMAIN_LABEL" \
     HostedZoneId="$HOSTED_ZONE_ID" \
     DeployCompute="$DEPLOY_COMPUTE" \
+    BackupBucketExists="$BACKUP_BUCKET_EXISTS" \
   --tags \
     Project=blockparty \
     Build="$STACK_NAME" \

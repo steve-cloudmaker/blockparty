@@ -79,8 +79,24 @@ Parameters:
       backup bucket or a DLM snapshot after rebuilding. See POST_DEPLOY.md's
       teardown section.
 
+  BackupBucketExists:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Set to "true" when minecraft-backups-<account>-<region> already
+      exists from a previous deploy — e.g. redeploying from scratch after a
+      tier-2 teardown, which retains the bucket on purpose. S3 bucket names
+      are globally unique, so trying to create it again fails CloudFormation's
+      early validation before the changeset even builds. When "true", the
+      template skips creating the bucket and just references it by its
+      (deterministic) name instead — it stays outside CloudFormation's
+      management from that point on, matching its Retain-on-delete
+      semantics anyway. Leave "false" for a genuinely first-ever deploy.
+
 Conditions:
   HasCompute: !Equals [!Ref DeployCompute, "true"]
+  ShouldCreateBackupBucket: !Equals [!Ref BackupBucketExists, "false"]
 
 Resources:
 
@@ -192,8 +208,14 @@ Resources:
                   - s3:ListBucket
                   - s3:DeleteObject
                 Resource:
-                  - !GetAtt BackupBucket.Arn
-                  - !Sub "${BackupBucket.Arn}/*"
+                  - !If
+                    - ShouldCreateBackupBucket
+                    - !GetAtt BackupBucket.Arn
+                    - !Sub "arn:aws:s3:::minecraft-backups-${AWS::AccountId}-${AWS::Region}"
+                  - !If
+                    - ShouldCreateBackupBucket
+                    - !Sub "${BackupBucket.Arn}/*"
+                    - !Sub "arn:aws:s3:::minecraft-backups-${AWS::AccountId}-${AWS::Region}/*"
         - PolicyName: dns-and-cert-access
           PolicyDocument:
             Version: "2012-10-17"
@@ -228,6 +250,7 @@ Resources:
   # -------------------------------------------------------------- S3 backups
   BackupBucket:
     Type: AWS::S3::Bucket
+    Condition: ShouldCreateBackupBucket
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
@@ -751,7 +774,10 @@ Outputs:
     Value: !Ref Instance
 
   BackupBucketName:
-    Value: !Ref BackupBucket
+    Value: !If
+      - ShouldCreateBackupBucket
+      - !Ref BackupBucket
+      - !Sub "minecraft-backups-${AWS::AccountId}-${AWS::Region}"
 
   SsmConnectCommand:
     Description: Shell access — no SSH key needed
