@@ -180,6 +180,21 @@ sudo systemctl restart wings
 sudo systemctl status wings
 ```
 
+If `wings configure` hangs and fails with `context deadline exceeded`
+fetching `https://blockparty.charliesystems.ai/api/...`: Wings is trying to
+reach the panel over its public FQDN, which resolves to this instance's own
+Elastic IP — and an EC2 instance generally can't reach its own public IP
+back through the Internet Gateway (no NAT gateway in this VPC). Bootstrap
+now adds a loopback `/etc/hosts` entry for the subdomain to sidestep this,
+so this shouldn't happen on a fresh deploy; if it does anyway (e.g. an
+older instance from before this fix), add it by hand and retry:
+```
+echo "127.0.0.1 blockparty.charliesystems.ai" | sudo tee -a /etc/hosts
+```
+TLS still verifies correctly afterward — the cert matches the hostname
+regardless of which IP it's served from. You may need a fresh token from
+the panel's Auto-deploy if the failed attempt consumed the old one.
+
 ## 7. Create allocations (ports) on the node
 
 Admin → Nodes → your node → Allocations → Create:

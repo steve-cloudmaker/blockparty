@@ -33,10 +33,13 @@ describes the instance as of the last edit, not a log.
       *this* instance via a direct `ALTER TABLE`, since that fix landed in
       `POST_DEPLOY.md` after this instance had already migrated. Admin
       account: `steve.cloudmaker@gmail.com`, admin = yes.
-- [ ] **4. Log into the panel** — page loads with a trusted cert; actual
-      first login not yet confirmed.
-- [ ] **5. Create a Location and a Node**
-- [ ] **6. Apply Wings config, start Wings**
+- [x] **4. Log into the panel** — reachable and logged in (implied by
+      reaching step 5/6).
+- [x] **5. Create a Location and a Node** — done.
+- [x] **6. Apply Wings config, start Wings** — hit the hairpin-DNS timeout
+      (gotcha #6 in AI_ONBOARDING.md), fixed by hand with a loopback
+      `/etc/hosts` entry, then `wings configure` succeeded. Fix is now
+      permanent in `bootstrap.sh` for future deploys.
 - [ ] **7. Create allocations (25565, 25566)**
 - [ ] **8. Create the two servers (Paper, Forge/Fabric)**
 - [ ] **9. Wire up S3 backups**

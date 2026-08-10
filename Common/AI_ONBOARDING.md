@@ -78,6 +78,16 @@ edges hit so far are already patched. In rough chronological order:
    writing the real SSL `panel.conf` by hand (pointed at the host-managed
    cert) as part of the documented procedure — a bare `docker compose
    restart panel` after cert issuance is **not** sufficient on its own.
+6. **`wings configure` can hang and time out** with `context deadline
+   exceeded` fetching the panel's API over its public FQDN. That FQDN
+   resolves to this instance's own Elastic IP, and an EC2 instance
+   generally can't reach its own public IP back through the Internet
+   Gateway (no NAT gateway in this VPC — see `ARCHITECTURE.md`) — the
+   request just hangs. Fixed by having `bootstrap.sh` add a loopback
+   `/etc/hosts` entry for the subdomain before anything else runs, so
+   Wings and the panel talk over `127.0.0.1` instead. TLS still verifies
+   correctly either way, since the cert matches the hostname regardless of
+   which IP served it.
 
 ## Conventions
 

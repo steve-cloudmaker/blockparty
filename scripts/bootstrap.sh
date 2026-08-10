@@ -45,6 +45,15 @@ REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/la
 # Set via CloudFormation (SubdomainParameter) so this file needs no editing.
 SUBDOMAIN=$(aws ssm get-parameter --name /minecraft/subdomain --region "$REGION" --query 'Parameter.Value' --output text)
 
+# Panel and Wings run on the same box, but Wings talks to the panel over its
+# public FQDN (needed for `wings configure`'s --panel-url). Public DNS for
+# that FQDN resolves to this instance's own Elastic IP, and an EC2 instance
+# generally can't reach its own public IP back through the Internet Gateway
+# (no NAT gateway in this VPC to hairpin through) — that request just hangs
+# until it times out. Resolving the FQDN to loopback instead sidesteps it;
+# TLS still verifies fine since the cert matches the hostname either way.
+grep -q "$SUBDOMAIN" /etc/hosts || echo "127.0.0.1 $SUBDOMAIN" >> /etc/hosts
+
 # ---------------------------------------------------------------------------
 # 1. Find, format (if needed), and mount the data EBS volume at /srv/pterodactyl
 # ---------------------------------------------------------------------------
