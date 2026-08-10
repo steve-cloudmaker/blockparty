@@ -292,7 +292,10 @@ Resources:
           echo "=== bootstrap start: $(date -u) ==="
 
           dnf -y update
-          dnf -y install docker xfsprogs jq curl amazon-cloudwatch-agent
+          # --allowerasing: AL2023 ships curl-minimal by default, which conflicts
+          # with the full curl package needed here for certbot/AWS CLI downloads —
+          # without this flag dnf aborts the whole transaction.
+          dnf -y install --allowerasing docker xfsprogs jq curl amazon-cloudwatch-agent
           systemctl enable --now docker
 
           mkdir -p /usr/local/lib/docker/cli-plugins

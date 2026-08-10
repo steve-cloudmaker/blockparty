@@ -10,7 +10,10 @@ echo "=== bootstrap start: $(date -u) ==="
 # 0. Basics
 # ---------------------------------------------------------------------------
 dnf -y update
-dnf -y install docker xfsprogs jq curl amazon-cloudwatch-agent
+# --allowerasing: AL2023 ships curl-minimal by default, which conflicts with
+# the full curl package pulled in here (needed for certbot/AWS CLI download
+# steps below) — without this flag dnf aborts the whole transaction.
+dnf -y install --allowerasing docker xfsprogs jq curl amazon-cloudwatch-agent
 systemctl enable --now docker
 
 # Docker Compose v2 plugin (not bundled with AL2023's docker package)
