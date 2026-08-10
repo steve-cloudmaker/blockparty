@@ -43,15 +43,85 @@ DNS-01 for wildcards; HTTP-01 can't do it). The cert lands at
 `/etc/letsencrypt/live/blockparty.charliesystems.ai/`, which is bind-mounted
 straight into the panel container.
 
-Pick it up:
+**The panel image doesn't pick this up on its own.** Its entrypoint only
+writes an SSL nginx config when an `LE_EMAIL` env var is set — and setting
+that would make it run its *own* standalone HTTP-01 certbot, which conflicts
+with the wildcard DNS-01 cert we just issued on the host. So on first boot it
+wrote a plain HTTP-only `panel.conf` (bind-mounted at
+`/srv/pterodactyl/panel/nginx/`), which persists across restarts — a bare
+`docker compose restart panel` does **not** add an SSL server block.
+Write the real one, pointed at the cert already on disk, then restart:
+
 ```
+sudo tee /srv/pterodactyl/panel/nginx/panel.conf > /dev/null <<'NGINXCONF'
+server {
+    listen 80;
+    server_name blockparty.charliesystems.ai;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name blockparty.charliesystems.ai;
+
+    root /app/public;
+    index index.php;
+
+    access_log /var/log/nginx/pterodactyl.app-access.log;
+    error_log  /var/log/nginx/pterodactyl.app-error.log error;
+
+    client_max_body_size 100m;
+    client_body_timeout 120s;
+
+    sendfile off;
+
+    ssl_certificate /etc/letsencrypt/live/blockparty.charliesystems.ai/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/blockparty.charliesystems.ai/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+
+    add_header Strict-Transport-Security "max-age=15768000; preload;";
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header X-Robots-Tag none;
+    add_header Content-Security-Policy "frame-ancestors 'self'";
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass 127.0.0.1:9000;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param PHP_VALUE "upload_max_filesize = 100M \n post_max_size=100M";
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param HTTP_PROXY "";
+        fastcgi_intercept_errors off;
+        fastcgi_buffer_size 16k;
+        fastcgi_buffers 4 16k;
+        fastcgi_connect_timeout 300;
+        fastcgi_send_timeout 300;
+        fastcgi_read_timeout 300;
+        include /etc/nginx/fastcgi_params;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+NGINXCONF
 cd /srv/pterodactyl/panel
 docker compose restart panel
 ```
 
-Renewal is already automatic — a systemd timer (`certbot-renew.timer`,
-installed by bootstrap) runs `certbot renew` daily and restarts the panel
-container automatically when a renewal actually happens. Nothing further to
+This is a one-time step. Renewal after this is automatic — a systemd timer
+(`certbot-renew.timer`, installed by bootstrap) runs `certbot renew` daily
+and restarts the panel container when a renewal actually happens; since
+`panel.conf` now already has the SSL block pointed at the live cert path,
+that restart alone is enough to pick up a renewed cert. Nothing further to
 do here, ever, as long as the instance keeps running.
 
 **Scope note:** this wildcard cert covers everything under

@@ -145,10 +145,12 @@ COMPOSE
 
 # Real host path (not /srv/pterodactyl/panel/certs) so certbot, running
 # natively on the host, and the panel container both read/write the exact
-# same cert files at /etc/letsencrypt/live/$SUBDOMAIN/{fullchain,privkey}.pem
-# — the panel self-signs into this path on first boot, then certbot
-# overwrites it with the real wildcard cert once you run the POST_DEPLOY.md
-# step (`docker compose restart panel` picks it up).
+# same cert files at /etc/letsencrypt/live/$SUBDOMAIN/{fullchain,privkey}.pem.
+# The panel serves plain HTTP until then — its entrypoint only writes an SSL
+# nginx config when an LE_EMAIL env var triggers its own standalone certbot,
+# which we deliberately don't set (it'd conflict with the wildcard DNS-01 cert
+# issued here). POST_DEPLOY.md's cert step writes the real SSL panel.conf by
+# hand once the cert exists.
 mkdir -p /etc/letsencrypt
 
 cd /srv/pterodactyl/panel
