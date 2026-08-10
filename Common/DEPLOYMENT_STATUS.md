@@ -48,13 +48,14 @@ describes the instance as of the last edit, not a log.
       now shows `active (running)`, clean.
 - [x] **7. Create allocations (25565, 25566)** — done (IP `0.0.0.0` gotcha
       #9, documented but not a bug).
-- [x] **8. Create the two servers (Paper, Forge/Fabric)** — Paper server
-      created (4096MB memory, 5000MB disk). Hit "Could not establish a
-      connection to the machine running this server" — a second instance of
-      the hairpin-DNS problem, this time from inside the panel container's
-      isolated `/etc/hosts` (gotcha #10), fixed by hand with an
-      `extra_hosts: host-gateway` override, now permanent in `bootstrap.sh`.
-      Forge/Fabric server not yet created.
+- [x] **8. Create the two servers (Paper, Forge/Fabric)** — both done.
+      Paper server created first (4096MB memory, 5000MB disk) and hit
+      "Could not establish a connection to the machine running this
+      server" — a second instance of the hairpin-DNS problem, this time
+      from inside the panel container's isolated `/etc/hosts` (gotcha
+      #10), fixed by hand with an `extra_hosts: host-gateway` override, now
+      permanent in `bootstrap.sh`. Forge/Fabric server created afterward
+      with no issues — confirms the fix holds.
 - [ ] **9. Wire up S3 backups**
 - [ ] **10. Whitelist friends**
 - [ ] **11. Verify DDoS/security posture**
