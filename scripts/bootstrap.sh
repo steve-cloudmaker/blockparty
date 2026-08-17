@@ -144,8 +144,15 @@ services:
       APP_TIMEZONE: "UTC"
       APP_SERVICE_AUTHOR: "admin@example.com"
       TRUSTED_PROXIES: "*"
-      MAIL_FROM: "noreply@example.com"
-      MAIL_DRIVER: "log"
+      # Laravel SES driver; credentials come from the instance role via
+      # IMDSv2 (HttpPutResponseHopLimit is 2 so this container can reach
+      # 169.254.169.254). Do not set AWS_ACCESS_KEY_ID — an empty value
+      # would mask the role. Copying these lines into the live stack's
+      # UserData replaces the EC2 instance; patch compose in place instead.
+      MAIL_FROM: "noreply@${SUBDOMAIN}"
+      MAIL_DRIVER: "ses"
+      MAIL_MAILER: "ses"
+      AWS_DEFAULT_REGION: "${REGION}"
       DB_HOST: "database"
       DB_PORT: "3306"
       DB_DATABASE: "panel"

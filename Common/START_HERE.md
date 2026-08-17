@@ -16,6 +16,7 @@ project.
 | [`Common/AI_ONBOARDING.md`](AI_ONBOARDING.md) | Context for an AI assistant picking this up cold |
 | `cloudformation/minecraft-stack.yaml` | The whole stack, one file |
 | `scripts/{bootstrap,deploy,teardown}.sh` | Deploy tooling |
+| `scripts/refresh-deployment-status.sh` | Reconcile `DEPLOYMENT_STATUS.md` against live AWS/SSM (dry-run by default; `--write` to apply) |
 | `scripts/diagnose.sh` | Health check — run on the instance over SSM before manually diagnosing anything |
 
 ## If you're deploying this for the first time
@@ -26,10 +27,11 @@ project.
 
 ## If you're picking up mid-deployment
 
-Check [`Common/DEPLOYMENT_STATUS.md`](DEPLOYMENT_STATUS.md) first — it tracks
-which `POST_DEPLOY.md` step this specific live instance is actually on, plus
-any workarounds already applied by hand that aren't baked into the automated
-scripts yet.
+Run `AWS_REGION=us-west-1 scripts/refresh-deployment-status.sh` first — it
+diffs live CloudFormation/DNS/S3/SSM state against
+[`Common/DEPLOYMENT_STATUS.md`](DEPLOYMENT_STATUS.md) and exits non-zero if
+the file is stale. Pass `--write` to rewrite the checklist. Then read the
+status file for which `POST_DEPLOY.md` step you're on.
 
 ## If you're an AI assistant
 

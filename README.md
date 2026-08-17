@@ -27,7 +27,7 @@ into CloudFormation parameters.
 
 Two teardown levels — see `POST_DEPLOY.md`'s teardown section for details:
 - `DEPLOY_COMPUTE=false scripts/deploy.sh` — tear down just the EC2
-  instance/EBS volume/EIP association, keep the VPC/SG/IAM/S3 backups/DNS
+  instance/EBS volume/EIP association, keep the VPC/SG/IAM/S3 backups/DNS/SES
   in place for a fast rebuild. Re-run `scripts/deploy.sh` normally to
   rebuild.
 - `scripts/teardown.sh` — delete everything (the S3 backup bucket is
@@ -38,11 +38,12 @@ Two teardown levels — see `POST_DEPLOY.md`'s teardown section for details:
 | File | Purpose |
 |---|---|
 | `ARCHITECTURE.md` | Design, security model, DNS/TLS approach, DDoS approach, backup strategy, cost estimate |
-| `cloudformation/minecraft-stack.yaml` | The whole stack — VPC, security group, IAM, EC2, EBS, S3, DLM snapshots, CloudWatch alarms, Route 53 records |
+| `cloudformation/minecraft-stack.yaml` | The whole stack — VPC, security group, IAM, EC2, EBS, S3, DLM snapshots, CloudWatch alarms, Route 53 records, SES mail |
 | `scripts/bootstrap.sh` | Human-readable copy of the EC2 user-data (installs Docker, Pterodactyl Panel, Wings, certbot) — the template embeds an equivalent copy directly |
 | `scripts/deploy.sh` | `aws cloudformation deploy` wrapper, auto-looks-up the hosted zone |
 | `scripts/teardown.sh` | `aws cloudformation delete-stack` wrapper |
 | `scripts/diagnose.sh` | Read-only health check — run on the instance to check for every known failure mode in one pass instead of clicking through the panel UI |
+| `scripts/refresh-deployment-status.sh` | Reconcile `Common/DEPLOYMENT_STATUS.md` against live AWS/SSM (dry-run; `--write` to update the file) |
 | `POST_DEPLOY.md` | Manual setup after the stack is up: DNS check, wildcard cert issuance, admin account, node registration, server creation, backups, whitelist |
 
 ## Dev setup

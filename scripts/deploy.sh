@@ -97,11 +97,11 @@ if [ "$DEPLOY_COMPUTE" = "false" ]; then
   echo "DeployCompute=false: this TEARS DOWN the EC2 instance, its EBS data volume,"
   echo "the Elastic IP association, and the instance's CloudWatch alarms. World data"
   echo "on the EBS volume is gone after this — the VPC, security group, IAM, S3"
-  echo "backup bucket, DNS records, DLM snapshot policy, and SNS topic all stay in"
-  echo "place. Re-run without DEPLOY_COMPUTE=false to rebuild."
+  echo "backup bucket, DNS records, SES mail identity, DLM snapshot policy, and SNS"
+  echo "topics all stay in place. Re-run without DEPLOY_COMPUTE=false to rebuild."
 else
   echo "This will create billed AWS resources (EC2, EBS, EIP, S3, CloudWatch, SNS,"
-  echo "Route 53 records) and gives the instance write access to that one hosted zone"
+  echo "Route 53 records, SES) and gives the instance write access to that one hosted zone"
   echo "(needed for automatic wildcard cert issuance/renewal via certbot's DNS-01 challenge)."
 fi
 read -rp "Continue? [y/N] " CONFIRM
@@ -138,10 +138,11 @@ aws cloudformation describe-stacks \
 
 echo
 if [ "$DEPLOY_COMPUTE" = "false" ]; then
-  echo "Compute torn down. Core infra (VPC/SG/IAM/S3 backups/DNS/DLM/SNS) is still"
+  echo "Compute torn down. Core infra (VPC/SG/IAM/S3 backups/DNS/SES/DLM/SNS) is still"
   echo "in place. Re-run without DEPLOY_COMPUTE=false to rebuild the instance."
 else
-  echo "Next: confirm the SNS email subscription in your inbox, then wait ~3-5 min"
+  echo "Next: confirm BOTH SNS email subscriptions in your inbox (CloudWatch alarms"
+  echo "and minecraft-server-ses-events for bounces/complaints), then wait ~3-5 min"
   echo "for bootstrap to finish (check with the SsmConnectCommand output above,"
   echo "then: sudo tail -f /var/log/bootstrap.log). After that, follow POST_DEPLOY.md"
   echo "(admin account, node registration, server creation, then the wildcard TLS cert)."

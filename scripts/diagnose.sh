@@ -68,6 +68,14 @@ if [ -f /srv/pterodactyl/panel/docker-compose.yml ]; then
   else
     warn "panel compose network has no explicit subnet pin -- could collide with Wings' default 172.18.0.0/16, see POST_DEPLOY.md step 6"
   fi
+
+  if grep -qE 'MAIL_MAILER: "ses"|MAIL_DRIVER: "ses"' docker-compose.yml; then
+    ok "panel mail driver is SES"
+  elif grep -q 'MAIL_DRIVER: "log"' docker-compose.yml; then
+    warn "panel MAIL_DRIVER is log — invites are written to laravel.log, not emailed"
+  else
+    warn "panel mail driver is not SES — check MAIL_MAILER/MAIL_DRIVER in docker-compose.yml"
+  fi
 else
   fail "no docker-compose.yml at /srv/pterodactyl/panel -- bootstrap may not have finished"
 fi

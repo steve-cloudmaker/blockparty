@@ -71,8 +71,8 @@ Parameters:
       Set to "false" to tear down to core infra only — deletes the EC2
       instance, its EBS data volume, the Elastic IP association, and the
       instance-scoped CloudWatch alarms, while keeping the VPC, security
-      group, IAM, S3 backups, DNS records, the DLM snapshot policy, and the
-      SNS alarm topic/subscription in place. Set back to "true" (the
+      group, IAM, S3 backups, DNS records, the SES sending identity, the
+      DLM snapshot policy, and the SNS alarm topic/subscription in place. Set back to "true" (the
       default) to rebuild: a fresh instance boots via the same bootstrap,
       re-associates with the same Elastic IP, so DNS needs no changes.
       Data on the old EBS volume is gone — restore world saves from the S3
@@ -241,6 +241,20 @@ Resources:
               - Effect: Allow
                 Action: ssm:GetParameter
                 Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/minecraft/*"
+        # Panel sends invites/password-resets via the Laravel SES driver,
+        # using this instance role (IMDSv2 hop limit is already 2 so the
+        # Dockerized panel can reach the metadata service). No SMTP user.
+        - PolicyName: ses-send-mail
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource:
+                  - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SubdomainLabel}.${RootDomain}"
+                  - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${PanelMailConfigSet}"
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -644,6 +658,126 @@ Resources:
       Type: SRV
       TTL: "300"
       ResourceRecords: [!Sub "0 5 25566 ${SubdomainLabel}.${RootDomain}."]
+
+  # --------------------------------------------------------------- SES mail
+  # Domain identity for panel transactional mail (invites, password resets).
+  # Easy DKIM CNAMEs + an SPF TXT on the same name as the existing A record
+  # (TXT and A coexist). Changing Instance UserData would replace the live
+  # host, so MAIL_* in the embedded bootstrap stays "log"; the live compose
+  # file and scripts/bootstrap.sh are what actually point at SES.
+  PanelMailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Sub "${SubdomainLabel}.${RootDomain}"
+      # Default config set so panel sends pick up bounce/complaint
+      # publishing without Laravel knowing about it. Feedback
+      # forwarding is off: noreply@ has no inbox, SNS is the process.
+      ConfigurationSetAttributes:
+        ConfigurationSetName: !Ref PanelMailConfigSet
+      FeedbackAttributes:
+        EmailForwardingEnabled: false
+
+  PanelMailDkim1:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !GetAtt PanelMailIdentity.DkimDNSTokenName1
+      Type: CNAME
+      TTL: "1800"
+      ResourceRecords: [!GetAtt PanelMailIdentity.DkimDNSTokenValue1]
+
+  PanelMailDkim2:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !GetAtt PanelMailIdentity.DkimDNSTokenName2
+      Type: CNAME
+      TTL: "1800"
+      ResourceRecords: [!GetAtt PanelMailIdentity.DkimDNSTokenValue2]
+
+  PanelMailDkim3:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !GetAtt PanelMailIdentity.DkimDNSTokenName3
+      Type: CNAME
+      TTL: "1800"
+      ResourceRecords: [!GetAtt PanelMailIdentity.DkimDNSTokenValue3]
+
+  PanelMailSpf:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "${SubdomainLabel}.${RootDomain}."
+      Type: TXT
+      TTL: "300"
+      ResourceRecords:
+        - '"v=spf1 include:amazonses.com ~all"'
+
+  # Bounce/complaint process at this volume: SES account suppression
+  # already drops future sends to bounced/complained addresses; this
+  # config set publishes each bounce/complaint/reject to SNS so a human
+  # sees it (required for SES production). Dedicated topic — don't mix
+  # with instance alarms. Email subscription needs a confirm click,
+  # same as AlarmSubscription.
+  PanelMailConfigSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name: !Sub "${AWS::StackName}-panel-mail"
+      ReputationOptions:
+        ReputationMetricsEnabled: true
+      SuppressionOptions:
+        SuppressedReasons: [BOUNCE, COMPLAINT]
+
+  PanelMailEventsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-ses-events"
+      DisplayName: blockparty SES bounces/complaints
+
+  PanelMailEventsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref PanelMailEventsTopic]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSesPublish
+            Effect: Allow
+            Principal: { Service: ses.amazonaws.com }
+            Action: sns:Publish
+            Resource: !Ref PanelMailEventsTopic
+            Condition:
+              StringEquals:
+                AWS:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                AWS:SourceArn: !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${PanelMailConfigSet}"
+
+  PanelMailEventsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref PanelMailEventsTopic
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
+
+  PanelMailEvents:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    DependsOn: PanelMailEventsTopicPolicy
+    Properties:
+      ConfigurationSetName: !Ref PanelMailConfigSet
+      EventDestination:
+        Name: sns-bounces-complaints
+        Enabled: true
+        MatchingEventTypes: [bounce, complaint, reject]
+        SnsDestination:
+          TopicARN: !Ref PanelMailEventsTopic
+
+  # Verified so sandbox tests could land while production access was
+  # pending. Harmless to keep once production is granted.
+  NotificationEmailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref NotificationEmail
 
   # -------------------------------------------------------------- Snapshots
   DlmRole:

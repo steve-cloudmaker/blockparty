@@ -152,6 +152,21 @@ docker compose exec panel php artisan p:user:make
 ```
 Follow the prompts (email, username, password, and answer "yes" to admin).
 
+Additional panel users created from the UI get an invite email from
+`noreply@blockparty.charliesystems.ai` via SES (instance role, no SMTP
+keys). Confirm the SNS subscription for topic `minecraft-server-ses-events`
+— that's a second confirm-click, separate from the CloudWatch alarm topic
+`deploy.sh` already mentioned. Bounce/complaint notices go there; SES's
+suppression list then stops retrying that address.
+
+The live panel's `MAIL_*` env was patched in place. The embedded
+CloudFormation UserData still writes `MAIL_DRIVER: log` because changing
+UserData replaces the instance. After a compute rebuild, copy the `MAIL_*`
+block from `scripts/bootstrap.sh` into
+`/srv/pterodactyl/panel/docker-compose.yml` and run `docker compose up -d
+panel`, or copy those lines into the template UserData as part of the
+rebuild. `scripts/diagnose.sh` warns if the driver is still `log`.
+
 ## 4. Log into the panel
 
 Browse to `https://blockparty.charliesystems.ai` from the machine whose IP
@@ -263,7 +278,20 @@ no port number needed.)
 
 ## 8. Create the two servers
 
-Admin → Servers → New:
+Admin → Servers → New. Use the same resource/feature limits for both:
+
+| Field | Value |
+|---|---|
+| Memory | `4096` MB |
+| Disk | `5000` MB |
+| Enable OOM Killer | on |
+| Database Limit | `1` |
+| Allocation Limit | `1` |
+| Backup Limit | `1` |
+
+Leaving Backup Limit at 0 means the Backups tab won't let you create any,
+and you'll need step 9 to actually work. These are usually editable later
+without a rebuild via Admin → Servers → your server → Build Configuration.
 
 **Paper world**
 - Nest/Egg: Minecraft Java → Paper
@@ -276,33 +304,33 @@ Admin → Servers → New:
   specific modpack a dropdown instead of manual jar wrangling)
 - Allocation: `25566`
 
-**Set Backup Limit to at least 1** in the server's feature limits (memory
-allocated in this session was 4096MB / disk 5000MB for the Paper world —
-size these to what your instance and worlds actually need). Leaving it at
-0 means the Backups tab won't let you create any, and you'll need step 9
-to actually work. This is usually editable later without a rebuild via
-Admin → Servers → your server → Build Configuration, if you catch it after
-the fact.
-
 Each server gets its own console, file manager, and scheduler in the panel
 — that's where day-to-day plugin/mod management happens (upload a plugin
 jar to `/plugins`, restart; pick a new modpack version from the egg
 dropdown, reinstall).
 
-If a Forge server's console shows `Error: Unable to access jarfile
-server.jar` right after "Server marked as starting": the install itself
-succeeded, but modern Forge versions (roughly 1.17+) ship a launcher script
-(`run.sh`) plus a `*-shim.jar`, not a monolithic `server.jar` — the built-in
-"Forge" egg's default Startup Command still hardcodes `-jar server.jar`,
-which doesn't exist for these versions. Check what actually got installed:
-```
-sudo ls /var/lib/pterodactyl/volumes/<server-uuid>/
-```
-Then on the server's **Startup** tab, find the **Server Jar File** variable
-(or edit the Startup Command directly if there isn't one) and point it at
-the real filename — something like `forge-<version>-shim.jar`. Not an
-infrastructure bug, just an egg/Minecraft-version mismatch; not worth
-baking a fix into `bootstrap.sh` for.
+**Forge: expected first-boot jar fix (do this as one workflow).** Modern
+Forge (roughly 1.17+) installs a launcher script (`run.sh`) plus a
+`*-shim.jar`, not a monolithic `server.jar`, but the built-in "Forge" egg's
+default Startup Command still hardcodes `-jar server.jar`. The real jar
+name isn't knowable until the install finishes, so don't treat the first
+crash as a failure — bake the fix into create:
+
+1. Create the Forge server and let the install run to completion (console
+   will typically hit `Unable to access jarfile server.jar` right after
+   "Server marked as starting" — that's the signal the files are on disk).
+2. Find the actual launcher on the host:
+   ```
+   sudo ls /var/lib/pterodactyl/volumes/<server-uuid>/
+   ```
+   Look for something like `forge-<version>-shim.jar` (or `run.sh`).
+3. On the server's **Startup** tab, set **Server Jar File** (or edit the
+   Startup Command) to that real filename — not `server.jar`.
+4. Restart the server from the panel and confirm the console gets past
+   jar launch.
+
+Not an infrastructure bug and not worth baking into `bootstrap.sh` — just
+an egg/Minecraft-version mismatch that has to wait for the first install.
 
 **Faster than clicking through the panel to find issues like this:**
 `scripts/diagnose.sh` checks every failure mode this project has hit so far
@@ -386,8 +414,8 @@ Two tiers, depending on how much you want to keep:
 with the instance/EBS volume, start fresh" scenarios. Tears down the EC2
 instance, its EBS data volume, the Elastic IP *association*, and the
 instance-scoped CloudWatch alarms — keeps the VPC, security group, IAM, S3
-backup bucket, DNS records, DLM snapshot policy, and SNS topic/subscription
-in place. This is a stack **update**, not a delete:
+backup bucket, DNS records, SES sending identity (DKIM/SPF + bounce/complaint
+SNS), DLM snapshot policy, and SNS alarm topic/subscription in place. This is a stack **update**, not a delete:
 ```
 DEPLOY_COMPUTE=false scripts/deploy.sh
 ```
@@ -401,7 +429,8 @@ a DLM EBS snapshot (whole-volume, daily, 7-day retention) after rebuilding
 and re-registering the node.
 
 **Tier 2 — everything, to zero.** `scripts/teardown.sh` deletes the whole
-stack: VPC, security group, IAM, DNS records, DLM policy, SNS topic, and
+stack: VPC, security group, IAM, DNS records, SES identities/config set,
+DLM policy, SNS topics, and
 the EC2 instance if one still exists. The S3 backup bucket survives even
 this (`DeletionPolicy: Retain`) — deleting your actual backups is
 deliberately never bundled into a scripted teardown. The script prints the

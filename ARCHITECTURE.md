@@ -98,9 +98,14 @@ open match to what AccuWebHosting-style hosts run. Two components:
     as the actual access control.
   - Everything else denied by default.
 - IAM instance role scoped to: SSM Session Manager, CloudWatch agent
-  metrics, read/write to the one backup S3 bucket, and — new — write access
-  to DNS records in *just* the `charliesystems.ai` hosted zone plus read of
-  one SSM parameter (`/minecraft/subdomain`). Nothing account-wide.
+  metrics, read/write to the one backup S3 bucket, write access to DNS
+  records in *just* the `charliesystems.ai` hosted zone, read of one SSM
+  parameter (`/minecraft/subdomain`), and `ses:SendEmail` /
+  `ses:SendRawEmail` on the `blockparty.charliesystems.ai` identity and
+  its configuration set (panel invites/password-resets; Laravel SES
+  driver, no SMTP user). Bounces, complaints, and rejects publish to an
+  SNS topic emailed to the notification address; SES's account suppression
+  list then refuses further sends to that recipient. Nothing account-wide.
 - Root/admin EBS volumes encrypted by default (AWS default account setting
   should already have EBS encryption-by-default on — the template also sets
   it explicitly).
@@ -134,6 +139,23 @@ open match to what AccuWebHosting-style hosts run. Two components:
   AccuWebHosting. Security there is the SG + whitelist + Shield Standard,
   covered below.
 
+## Panel mail (SES)
+
+Invites and password resets send from
+`noreply@blockparty.charliesystems.ai` via the Laravel SES driver. The
+panel container uses the instance role (IMDSv2 hop limit is already 2);
+there is no SMTP user or access key. A default configuration set on the
+domain identity (`minecraft-server-panel-mail`) publishes bounce,
+complaint, and reject events to SNS topic `minecraft-server-ses-events`,
+emailed to the same notification address as the CloudWatch alarms.
+Confirm that second SNS subscription or the notices never arrive. SES's
+account suppression list then refuses further sends to that recipient.
+
+Changing `MAIL_*` in the embedded CloudFormation UserData **replaces the
+EC2 instance**, so the live compose file was patched in place and
+`scripts/bootstrap.sh` is the source of truth for the next compute
+rebuild. `scripts/diagnose.sh` warns if the live driver is still `log`.
+
 ## DDoS protection
 
 - **AWS Shield Standard** is automatic and free on any Elastic IP — it
@@ -164,7 +186,8 @@ open match to what AccuWebHosting-style hosts run. Two components:
 ## Teardown tiers
 
 The template splits resources into "core" (VPC, security group, IAM, the S3
-backup bucket, DNS records, the DLM snapshot policy, the SNS alarm topic)
+backup bucket, DNS records, the SES sending identity + DKIM/SPF +
+bounce/complaint SNS, the DLM snapshot policy, the SNS alarm topic)
 and "compute" (the EC2 instance, its EBS data volume, the Elastic IP
 *association*, and the instance-scoped CloudWatch alarms), gated by a
 `DeployCompute` parameter/`HasCompute` condition. This gives two teardown
@@ -214,6 +237,8 @@ having to cross-reference instance/volume IDs by hand.
   the agent fills that gap).
 - Alarms on high CPU, high memory, low disk, and instance status-check
   failure, notifying an email you provide via SNS.
+- SES bounce/complaint/reject events on a **separate** SNS topic
+  (`minecraft-server-ses-events`) so they don't mix with instance alarms.
 
 ## Modpack & plugin management
 

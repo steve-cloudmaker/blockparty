@@ -141,9 +141,10 @@ edges hit so far are already patched. In rough chronological order:
     succeeded. Modern Forge (roughly 1.17+) installs a launcher script
     (`run.sh`) plus a `*-shim.jar` instead of a monolithic `server.jar`, but
     the built-in "Forge" egg's default Startup Command hardcodes `-jar
-    server.jar`. Not an infrastructure bug — fix is in the panel UI (the
-    server's Startup tab → Server Jar File variable, or the Startup Command
-    directly), not `bootstrap.sh`.
+    server.jar`. Expected on first boot — the real jar name isn't knowable
+    until install finishes. Workflow in `POST_DEPLOY.md` step 8: create →
+    let install finish → `ls` the volume for the shim jar → point Startup
+    at it → restart. Not an infrastructure bug; not `bootstrap.sh`.
 13. **Redeploying from scratch after a tier-2 teardown fails changeset
     creation** with `[AWS::EarlyValidation::ResourceExistenceCheck]`. The
     S3 backup bucket survives the teardown on purpose
@@ -160,6 +161,25 @@ edges hit so far are already patched. In rough chronological order:
     failed attempt leaves a stub stack in `REVIEW_IN_PROGRESS` with no real
     resources — safe to `aws cloudformation delete-stack` before retrying
     on a current checkout.
+14. **Panel invites never arrive in Gmail.** The original bootstrap set
+    `MAIL_DRIVER: "log"`, so Laravel wrote the MIME message to
+    `/srv/pterodactyl/panel/logs/` and never called SES. Mail is now the
+    Laravel `ses` driver, credentials from the instance role (no SMTP
+    user), from `noreply@blockparty.charliesystems.ai`. Production access is
+    granted. Bounce/complaint handling is a configuration set default on
+    the domain identity (`minecraft-server-panel-mail`) publishing to SNS
+    topic `minecraft-server-ses-events` (email the notification address);
+    the account suppression list already blocks re-sends. Confirm the SNS
+    subscription or those notifications never arrive. Two traps:
+    (a) Before production access, a "sent" invite to an unverified Gmail
+    is a `MessageRejected`, not a log-driver miss. (b) Do **not** "fix"
+    mail by editing `MAIL_*` in the embedded
+    CloudFormation UserData on a live stack — `AWS::EC2::Instance`
+    UserData updates replace the instance. Patch
+    `/srv/pterodactyl/panel/docker-compose.yml` in place (then
+    `docker compose up -d panel`) and keep `scripts/bootstrap.sh` as the
+    source of truth for the next compute rebuild; copy those `MAIL_*`
+    lines into the template UserData only as part of that rebuild.
 
 ## Diagnosing faster than clicking through the UI
 
@@ -176,7 +196,8 @@ from your own machine — see `POST_DEPLOY.md` step 11.
 ## Teardown tiers and tagging
 
 The template has a `DeployCompute` parameter/`HasCompute` condition
-splitting resources into "core" (VPC, SG, IAM, S3 backups, DNS, DLM, SNS)
+splitting resources into "core" (VPC, SG, IAM, S3 backups, DNS, SES mail,
+DLM, SNS)
 and "compute" (EC2 instance, EBS data volume, EIP *association*,
 instance-scoped alarms). `DEPLOY_COMPUTE=false scripts/deploy.sh` tears
 down just compute via a stack update; re-running `scripts/deploy.sh`

@@ -4,5 +4,6 @@
 .env.*
 *.pem
 *.key
+*.pkg
 *credentials*
 *secret*
